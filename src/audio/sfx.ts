@@ -132,3 +132,109 @@ export function playFuelBeep(ctx: BaseAudioContext, out: AudioNode): void {
   tone(ctx, out, { type: "sine", freqFrom: 950, gain: 0.2, duration: 0.14 });
   tone(ctx, out, { type: "sine", freqFrom: 950, gain: 0.2, duration: 0.14, at: 0.2 });
 }
+
+export interface DrillVoice {
+  /** Gate for the whole voice; eased to 0 when not digging. */
+  gate: GainNode;
+  motor: OscillatorNode;
+  motorFilter: BiquadFilterNode;
+  chatterLfo: OscillatorNode;
+}
+
+/**
+ * The drill loop, layered like the real thing instead of a raw synth buzz:
+ *  - grind: low broadband noise, the bit shearing rock
+ *  - chatter: midrange noise amplitude-modulated at strike rate (~24 Hz)
+ *  - motor: heavily lowpassed sawtooth hum with slow pitch wobble
+ * Everything passes a 2 kHz lowpass — content above that is what reads as
+ * "fake" and gets fatiguing. Built against BaseAudioContext so tests can
+ * render it through an OfflineAudioContext.
+ */
+export function buildDrillVoice(ctx: BaseAudioContext, out: AudioNode): DrillVoice {
+  const gate = ctx.createGain();
+  gate.gain.value = 0;
+  // The whole voice pulses at strike rate — sitting inside the gate so the
+  // modulation can't leak sound while the drill is idle.
+  const body = ctx.createGain();
+  body.gain.value = 1;
+  const soften = ctx.createBiquadFilter();
+  soften.type = "lowpass";
+  soften.frequency.value = 2000;
+  body.connect(gate);
+  gate.connect(soften).connect(out);
+
+  const noise = (): AudioBufferSourceNode => {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx);
+    src.loop = true;
+    src.start(0, Math.random());
+    return src;
+  };
+
+  const grindBP = ctx.createBiquadFilter();
+  grindBP.type = "bandpass";
+  grindBP.frequency.value = 160;
+  grindBP.Q.value = 0.7;
+  const grindGain = ctx.createGain();
+  grindGain.gain.value = 0.55;
+  noise().connect(grindBP).connect(grindGain).connect(body);
+
+  // Chatter: sine LFO swings the midrange band ±0.28 around a 0.3 floor,
+  // so the strikes never fully silence the grind underneath.
+  const chatterBP = ctx.createBiquadFilter();
+  chatterBP.type = "bandpass";
+  chatterBP.frequency.value = 720;
+  chatterBP.Q.value = 2.2;
+  const chatterAmp = ctx.createGain();
+  chatterAmp.gain.value = 0.3;
+  const chatterLfo = ctx.createOscillator();
+  chatterLfo.frequency.value = 24;
+  const lfoDepth = ctx.createGain();
+  lfoDepth.gain.value = 0.32;
+  chatterLfo.connect(lfoDepth).connect(chatterAmp.gain);
+  const bodyDepth = ctx.createGain();
+  bodyDepth.gain.value = 0.25;
+  chatterLfo.connect(bodyDepth).connect(body.gain);
+  chatterLfo.start();
+  noise().connect(chatterBP).connect(chatterAmp).connect(body);
+
+  const motor = ctx.createOscillator();
+  motor.type = "sawtooth";
+  motor.frequency.value = 80;
+  const motorFilter = ctx.createBiquadFilter();
+  motorFilter.type = "lowpass";
+  motorFilter.frequency.value = 240;
+  const motorGain = ctx.createGain();
+  motorGain.gain.value = 0.4;
+  motor.connect(motorFilter).connect(motorGain).connect(body);
+  motor.start();
+  // Two incommensurate wobble rates ≈ quasi-random drift, like load variation.
+  for (const [rate, depth] of [
+    [0.9, 2.5],
+    [5.3, 1.2],
+  ] as const) {
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = depth;
+    lfo.connect(g).connect(motor.frequency);
+    lfo.start();
+  }
+
+  return { gate, motor, motorFilter, chatterLfo };
+}
+
+/** Ease the drill toward the current dig state; call once per frame. */
+export function updateDrillVoice(
+  v: DrillVoice,
+  digging: boolean,
+  progress: number,
+  now: number,
+): void {
+  v.gate.gain.setTargetAtTime(digging ? 0.45 : 0, now, digging ? 0.05 : 0.12);
+  if (!digging) return;
+  // Deeper bite: faster strikes, motor revs and brightens slightly.
+  v.chatterLfo.frequency.setTargetAtTime(22 + progress * 16, now, 0.08);
+  v.motor.frequency.setTargetAtTime(78 + progress * 26, now, 0.08);
+  v.motorFilter.frequency.setTargetAtTime(230 + progress * 320, now, 0.06);
+}

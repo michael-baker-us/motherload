@@ -37,7 +37,7 @@ export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private thrust: LoopVoice | null = null;
-  private drill: LoopVoice | null = null;
+  private drill: sfx.DrillVoice | null = null;
   private wind: LoopVoice | null = null;
   private rumble: LoopVoice | null = null;
   private beepTimer = 0;
@@ -98,12 +98,7 @@ export class AudioEngine {
 
     this.setLoop(this.thrust, playing && game.isThrusting ? 0.16 : 0, now);
     const digging = playing && p.hasDigTarget;
-    this.setLoop(this.drill, digging ? 0.22 : 0, now);
-    if (this.drill && digging) {
-      // The drill note climbs as the bite progresses — audible feedback that
-      // the tile is about to pop.
-      this.drill.filter.frequency.setTargetAtTime(280 + p.digProgress * 900, now, 0.05);
-    }
+    if (this.drill) sfx.updateDrillVoice(this.drill, digging, p.digProgress, now);
 
     // Ambient beds crossfade with depth: wind topside, rumble down deep.
     const depth = game.depth;
@@ -174,16 +169,9 @@ export class AudioEngine {
 
     // Continuous voices run forever at gain 0; frame() opens them as needed.
     this.thrust = this.makeNoiseLoop("bandpass", 480, 0.9);
-    this.drill = this.makeNoiseLoop("lowpass", 320, 1);
+    this.drill = sfx.buildDrillVoice(ctx, master);
     this.wind = this.makeNoiseLoop("bandpass", 300, 0.4);
     this.rumble = this.makeNoiseLoop("lowpass", 90, 1);
-
-    // The drill also gets a saw growl under its noise for mechanical grit.
-    const saw = ctx.createOscillator();
-    saw.type = "sawtooth";
-    saw.frequency.value = 55;
-    saw.connect(this.drill.filter);
-    saw.start();
   }
 
   private makeNoiseLoop(type: BiquadFilterType, freq: number, playbackRate: number): LoopVoice {
