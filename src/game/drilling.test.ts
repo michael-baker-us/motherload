@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+import { TILE } from "./config";
+import { updateDrilling, type DigIntent } from "./drilling";
+import { createPlayer, type Player } from "./player";
+import { stepPlayer, type MoveInput } from "./physics";
+import { TILE_DEFS, TileId } from "./tiles";
+import { World } from "./world";
+
+const SURFACE = 6;
+const DT = 1 / 60;
+const IDLE: MoveInput = { thrustUp: false, moveLeft: false, moveRight: false };
+const NO_DIG: DigIntent = { down: false, left: false, right: false };
+
+function setup(): { world: World; p: Player; col: number } {
+  const world = new World(60, 2000, SURFACE, 42, TILE);
+  const p = createPlayer(world);
+  const col = Math.floor((p.x + p.width / 2) / TILE);
+  world.setTile(col, SURFACE, TileId.Dirt);
+  stepPlayer(p, world, IDLE, DT); // settle so grounded is set
+  return { world, p, col };
+}
+
+/** Run physics + drilling for `steps` frames, returning any tile dug. */
+function digFrames(
+  p: Player,
+  world: World,
+  intent: DigIntent,
+  steps: number,
+): TileId | null {
+  let dug: TileId | null = null;
+  for (let i = 0; i < steps; i++) {
+    stepPlayer(p, world, IDLE, DT);
+    const result = updateDrilling(p, world, intent, 1, DT);
+    if (result !== null) dug = result;
+  }
+  return dug;
+}
+
+describe("drilling", () => {
+  it("digs through dirt in hardness seconds", () => {
+    const { world, p, col } = setup();
+    const frames = Math.ceil(TILE_DEFS[TileId.Dirt].hardness! / DT) + 1;
+    const dug = digFrames(p, world, { ...NO_DIG, down: true }, frames);
+    expect(dug).toBe(TileId.Dirt);
+    expect(world.getTile(col, SURFACE)).toBe(TileId.Empty);
+  });
+
+  it("makes no progress while airborne", () => {
+    const { world, p } = setup();
+    p.grounded = false;
+    p.y -= 10;
+    updateDrilling(p, world, { ...NO_DIG, down: true }, 1, DT);
+    expect(p.hasDigTarget).toBe(false);
+    expect(p.digProgress).toBe(0);
+  });
+
+  it("resets progress when the key is released", () => {
+    const { world, p } = setup();
+    digFrames(p, world, { ...NO_DIG, down: true }, 5);
+    expect(p.digProgress).toBeGreaterThan(0);
+    digFrames(p, world, NO_DIG, 1);
+    expect(p.digProgress).toBe(0);
+    expect(p.hasDigTarget).toBe(false);
+  });
+
+  it("digs sideways only when pressed against the wall", () => {
+    const { world, p, col } = setup();
+    world.setTile(col + 1, SURFACE - 1, TileId.Dirt); // wall beside the pod
+    // Not touching the wall yet: no target.
+    updateDrilling(p, world, { ...NO_DIG, right: true }, 1, DT);
+    expect(p.hasDigTarget).toBe(false);
+
+    // Drive into the wall, then keep holding right to dig it.
+    let dug: TileId | null = null;
+    for (let i = 0; i < 120; i++) {
+      stepPlayer(p, world, { ...IDLE, moveRight: true }, DT);
+      const result = updateDrilling(p, world, { ...NO_DIG, right: true }, 1, DT);
+      if (result !== null) {
+        dug = result;
+        break;
+      }
+    }
+    expect(dug).toBe(TileId.Dirt);
+    expect(world.getTile(col + 1, SURFACE - 1)).toBe(TileId.Empty);
+  });
+
+  it("cannot dig bedrock", () => {
+    const { world, p } = setup();
+    world.setTile(Math.floor((p.x + p.width / 2) / TILE), SURFACE, TileId.Rock);
+    const dug = digFrames(p, world, { ...NO_DIG, down: true }, 120);
+    expect(dug).toBeNull();
+  });
+});
