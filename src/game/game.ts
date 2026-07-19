@@ -30,9 +30,13 @@ import { World } from "./world";
 
 export type GameState = "title" | "playing" | "shop" | "menu" | "dead";
 
-/** One-shot visual events for the renderer to consume (world coordinates). */
+/**
+ * One-shot game events (world coordinates). The audio engine reads the queue
+ * non-destructively each frame; the renderer then drains it, ignoring kinds
+ * it has no visual for.
+ */
 export interface FxEvent {
-  kind: "dug" | "impact" | "explosion" | "upgrade";
+  kind: "dug" | "impact" | "explosion" | "upgrade" | "pickup" | "sell" | "death";
   x: number;
   y: number;
   color?: string;
@@ -232,6 +236,7 @@ export class Game {
         if (TILE_DEFS[dug].value > 0) {
           if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
             this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
+            this.pushFx({ kind: "pickup", x: cx, y: cy });
           } else {
             this.showToast("CARGO FULL — mineral lost", 2);
           }
@@ -331,6 +336,11 @@ export class Game {
   die(cause: string): void {
     this.state = "dead";
     this.deathCause = cause;
+    this.pushFx({
+      kind: "death",
+      x: this.player.x + this.player.width / 2,
+      y: this.player.y + this.player.height / 2,
+    });
   }
 
   /** Fresh pod at the surface: full tank and hull, cargo gone, salvage fee charged. Upgrades persist. */
@@ -349,7 +359,7 @@ export class Game {
     this.toast = { text, timeLeft: seconds, total: seconds };
   }
 
-  private pushFx(event: FxEvent): void {
+  pushFx(event: FxEvent): void {
     this.fxEvents.push(event);
     if (this.fxEvents.length > 64) this.fxEvents.shift();
   }

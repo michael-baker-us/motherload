@@ -1,3 +1,5 @@
+import { AudioEngine } from "./audio/engine";
+import { loadAudioSettings } from "./audio/settings";
 import { Loop } from "./engine/loop";
 import { Input } from "./engine/input";
 import { Game } from "./game/game";
@@ -13,10 +15,13 @@ input.attach(window);
 
 const game = new Game(window.innerWidth, window.innerHeight, window.localStorage);
 const renderer = new Renderer();
+const audio = new AudioEngine(loadAudioSettings(window.localStorage), window.localStorage);
+audio.attach(window);
 
 // Dev-only handle for debugging and driving the game from the console/tests.
 if (import.meta.env.DEV) {
   (window as unknown as { __game: Game }).__game = game;
+  (window as unknown as { __audio: AudioEngine }).__audio = audio;
 }
 
 function resize(): void {
@@ -39,6 +44,8 @@ new Loop({
     input.endFrame();
   },
   render(alpha) {
+    // Audio reads fxEvents before the renderer drains them.
+    audio.frame(game);
     renderer.render(ctx!, game, alpha);
   },
 }).start();

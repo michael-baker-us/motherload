@@ -1,3 +1,4 @@
+import { activeAudio } from "../audio/engine";
 import type { DevCheats, Game } from "../game/game";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
@@ -75,6 +76,27 @@ export class MenuOverlay {
     if (!this.body) return;
     this.body.replaceChildren();
 
+    const audio = activeAudio();
+    if (audio) {
+      const s = audio.settings;
+      const volLabel = s.muted ? "muted" : `${Math.round(s.volume * 100)}%`;
+      this.buttonRow([
+        [`Sound: ${s.muted ? "OFF" : "ON"}`, s.muted ? "#7a3040" : "#3d5a80", () => {
+          audio.toggleMuted();
+          this.render(game);
+        }],
+        ["Vol −", "#3d5a80", () => {
+          audio.nudgeVolume(-1);
+          this.render(game);
+        }],
+        ["Vol +", "#3d5a80", () => {
+          audio.nudgeVolume(1);
+          this.render(game);
+        }],
+      ]);
+      this.line(`volume ${volLabel}`, "#888");
+    }
+
     for (const [cheat, label] of CHEAT_LABELS) {
       const on = game.cheats[cheat];
       this.button(`${label}: ${on ? "ON" : "OFF"}`, on ? "#c9762e" : "#2e7d32", () => {
@@ -97,6 +119,17 @@ export class MenuOverlay {
     div.textContent = text;
     div.style.cssText = `margin:6px 0 12px;font-size:12px;color:${color};`;
     this.body?.appendChild(div);
+  }
+
+  /** Several buttons on one line — used for the compact sound controls. */
+  private buttonRow(buttons: Array<[string, string, () => void]>): void {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;";
+    const prevBody = this.body;
+    this.body = row as HTMLDivElement;
+    for (const [label, background, onClick] of buttons) this.button(label, background, onClick);
+    this.body = prevBody;
+    this.body?.appendChild(row);
   }
 
   private button(label: string, background: string, onClick: () => void): void {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Input } from "../engine/input";
-import { ECONOMY, FUEL } from "./config";
+import { ECONOMY, FUEL, TILE } from "./config";
 import { Game } from "./game";
 import { TileId } from "./tiles";
 
@@ -16,6 +16,16 @@ function makeGame(storage: SaveStorage | null = null): Game {
   return game;
 }
 const idleInput = new Input(); // never attached — all keys up
+
+/** Input stub with the given keys held down. */
+function keysDown(...codes: string[]): Input {
+  return {
+    isDown: (...q: string[]) => q.some((c) => codes.includes(c)),
+    wasPressed: () => false,
+    endFrame: () => {},
+    reset: () => {},
+  } as unknown as Input;
+}
 
 function fakeStorage(): SaveStorage {
   const data = new Map<string, string>();
@@ -204,6 +214,28 @@ describe("game state machine", () => {
     game.toggleCheat("noDamage");
     game.applyDamage(5, "lava");
     expect(game.player.hull).toBe(hull - 5);
+  });
+
+  it("digging a mineral emits a pickup fx event", () => {
+    const game = makeGame();
+    for (let i = 0; i < 5; i++) game.update(DT, idleInput); // settle onto the surface
+    const p = game.player;
+    const col = Math.floor((p.x + p.width / 2) / TILE);
+    const row = Math.floor((p.y + p.height + 0.5) / TILE);
+    game.world.setTile(col, row, TileId.Ironium);
+
+    const digging = keysDown("ArrowDown");
+    for (let i = 0; i < 120 && !game.fxEvents.some((e) => e.kind === "pickup"); i++) {
+      game.update(DT, digging);
+    }
+    expect(game.fxEvents.some((e) => e.kind === "pickup")).toBe(true);
+    expect(p.cargo.get(TileId.Ironium)).toBe(1);
+  });
+
+  it("losing the pod emits a death fx event", () => {
+    const game = makeGame();
+    game.die("test");
+    expect(game.fxEvents.some((e) => e.kind === "death")).toBe(true);
   });
 
   it("reports the station under a parked pod", () => {
