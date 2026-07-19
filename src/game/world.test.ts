@@ -120,4 +120,12 @@ describe("digging tiles", () => {
     expect(w.dig(10, 0)).toBeNull(); // sky
     expect(w.getTile(0, SURFACE)).toBe(TileId.Rock);
   });
+
+  it("force-digs rock but still refuses air and out-of-bounds", () => {
+    const w = makeWorld();
+    expect(w.dig(0, SURFACE, true)).toBe(TileId.Rock); // bedrock border
+    expect(w.getTile(0, SURFACE)).toBe(TileId.Empty);
+    expect(w.dig(10, 0, true)).toBeNull(); // sky
+    expect(w.dig(-1, SURFACE, true)).toBeNull();
+  });
 });

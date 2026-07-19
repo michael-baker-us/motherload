@@ -25,8 +25,9 @@ export function updateDrilling(
   intent: DigIntent,
   drillPower: number,
   dt: number,
+  digAnything = false, // dev cheat: rock and bedrock become drillable
 ): TileId | null {
-  const target = findTarget(p, world, intent);
+  const target = findTarget(p, world, intent, digAnything);
   if (!target) {
     p.hasDigTarget = false;
     p.digProgress = 0;
@@ -40,18 +41,25 @@ export function updateDrilling(
     p.digProgress = 0;
   }
 
-  const hardness = TILE_DEFS[world.getTile(target.x, target.y)].hardness;
-  if (hardness === null) return null; // shouldn't happen; findTarget checks diggable
+  // Undiggable tiles use a stand-in hardness under the dev override.
+  const hardness = TILE_DEFS[world.getTile(target.x, target.y)].hardness ?? 0.6;
 
   p.digProgress += (dt * drillPower) / hardness;
   if (p.digProgress < 1) return null;
 
   p.hasDigTarget = false;
   p.digProgress = 0;
-  return world.dig(target.x, target.y);
+  return world.dig(target.x, target.y, digAnything);
 }
 
-function findTarget(p: Player, world: World, intent: DigIntent): { x: number; y: number } | null {
+function findTarget(
+  p: Player,
+  world: World,
+  intent: DigIntent,
+  digAnything: boolean,
+): { x: number; y: number } | null {
+  const canDig = (x: number, y: number): boolean =>
+    digAnything ? world.inBounds(x, y) && world.isSolid(x, y) : world.isDiggable(x, y);
   if (!p.grounded) return null;
 
   // Grounded means the pod's bottom sits exactly on a tile boundary, so the
@@ -60,16 +68,16 @@ function findTarget(p: Player, world: World, intent: DigIntent): { x: number; y:
   const belowRow = Math.floor((p.y + p.height + 0.5) / TILE);
   const podRow = belowRow - 1;
 
-  if (intent.down && world.isDiggable(centerCol, belowRow)) {
+  if (intent.down && canDig(centerCol, belowRow)) {
     return { x: centerCol, y: belowRow };
   }
   if (intent.left && p.touchingLeft) {
     const col = Math.floor((p.x - 0.5) / TILE);
-    if (world.isDiggable(col, podRow)) return { x: col, y: podRow };
+    if (canDig(col, podRow)) return { x: col, y: podRow };
   }
   if (intent.right && p.touchingRight) {
     const col = Math.floor((p.x + p.width + 0.5) / TILE);
-    if (world.isDiggable(col, podRow)) return { x: col, y: podRow };
+    if (canDig(col, podRow)) return { x: col, y: podRow };
   }
   return null;
 }

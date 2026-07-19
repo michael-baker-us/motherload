@@ -90,4 +90,20 @@ describe("drilling", () => {
     const dug = digFrames(p, world, { ...NO_DIG, down: true }, 120);
     expect(dug).toBeNull();
   });
+
+  it("digs bedrock with the dev digAnything override", () => {
+    const { world, p, col } = setup();
+    world.setTile(col, SURFACE, TileId.Rock);
+    let dug: TileId | null = null;
+    for (let i = 0; i < 120; i++) {
+      stepPlayer(p, world, IDLE, DT);
+      const result = updateDrilling(p, world, { ...NO_DIG, down: true }, 1, DT, true);
+      if (result !== null) {
+        dug = result;
+        break;
+      }
+    }
+    expect(dug).toBe(TileId.Rock);
+    expect(world.getTile(col, SURFACE)).toBe(TileId.Empty);
+  });
 });

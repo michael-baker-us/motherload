@@ -1,4 +1,11 @@
-import type { Game } from "../game/game";
+import type { DevCheats, Game } from "../game/game";
+
+const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
+  ["unlimitedFuel", "Unlimited fuel"],
+  ["unlimitedFunds", "Unlimited funds"],
+  ["noDamage", "No damage"],
+  ["digAnything", "Dig anything"],
+];
 
 /**
  * Pause/settings overlay (Escape). Same pattern as ShopOverlay: DOM on top,
@@ -68,14 +75,17 @@ export class MenuOverlay {
     if (!this.body) return;
     this.body.replaceChildren();
 
-    this.button(`Dev mode: ${game.devMode ? "ON" : "OFF"}`, game.devMode ? "#c9762e" : "#2e7d32", () => {
-      game.toggleDevMode();
-      this.render(game);
-    });
+    for (const [cheat, label] of CHEAT_LABELS) {
+      const on = game.cheats[cheat];
+      this.button(`${label}: ${on ? "ON" : "OFF"}`, on ? "#c9762e" : "#2e7d32", () => {
+        game.toggleCheat(cheat);
+        this.render(game);
+      });
+    }
     this.line(
       game.devMode
-        ? "⚠ unlimited fuel & funds · progress will NOT be saved"
-        : "cheats for testing: unlimited fuel & funds (disables saving)",
+        ? "⚠ cheats active · progress will NOT be saved"
+        : "dev cheats for testing — any active cheat disables saving",
       game.devMode ? "#ffb060" : "#888",
     );
 

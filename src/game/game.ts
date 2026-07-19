@@ -42,8 +42,16 @@ export interface FxEvent {
 /** Interval between surface autosaves while the pod is parked topside. */
 const AUTOSAVE_INTERVAL = 5;
 
-/** Money floor while dev mode is on. */
+/** Money floor while the unlimited-funds cheat is on. */
 const DEV_MONEY = 999999;
+
+/** Individually toggleable testing cheats. Saving is disabled while any is on. */
+export interface DevCheats {
+  unlimitedFuel: boolean;
+  unlimitedFunds: boolean;
+  noDamage: boolean;
+  digAnything: boolean;
+}
 
 export class Game {
   world: World;
@@ -58,8 +66,12 @@ export class Game {
   toast: { text: string; timeLeft: number; total: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
   readonly fxEvents: FxEvent[] = [];
-  /** Testing cheats: unlimited fuel & funds. Saving is disabled while on. */
-  devMode = false;
+  readonly cheats: DevCheats = {
+    unlimitedFuel: false,
+    unlimitedFunds: false,
+    noDamage: false,
+    digAnything: false,
+  };
 
   private readonly shop = new ShopOverlay();
   private readonly menu = new MenuOverlay();
@@ -122,9 +134,14 @@ export class Game {
     return true;
   }
 
-  toggleDevMode(): boolean {
-    this.devMode = !this.devMode;
-    return this.devMode;
+  /** True while any cheat is active — shows the HUD badge and blocks saving. */
+  get devMode(): boolean {
+    return Object.values(this.cheats).some(Boolean);
+  }
+
+  toggleCheat(cheat: keyof DevCheats): boolean {
+    this.cheats[cheat] = !this.cheats[cheat];
+    return this.cheats[cheat];
   }
 
   saveNow(): void {
@@ -168,10 +185,8 @@ export class Game {
     }
 
     const p = this.player;
-    if (this.devMode) {
-      p.fuel = p.maxFuel;
-      if (this.money < DEV_MONEY) this.money = DEV_MONEY;
-    }
+    if (this.cheats.unlimitedFuel) p.fuel = p.maxFuel;
+    if (this.cheats.unlimitedFunds && this.money < DEV_MONEY) this.money = DEV_MONEY;
     const move: MoveInput = {
       thrustUp: input.isDown("ArrowUp", "KeyW", "Space") && p.fuel > 0,
       moveLeft: input.isDown("ArrowLeft", "KeyA"),
@@ -201,6 +216,7 @@ export class Game {
       },
       this.drillPower,
       dt,
+      this.cheats.digAnything,
     );
     if (dug !== null) {
       const cx = digX * TILE + TILE / 2;
@@ -269,7 +285,7 @@ export class Game {
   }
 
   applyDamage(amount: number, cause: string): void {
-    if (this.state !== "playing") return;
+    if (this.state !== "playing" || this.cheats.noDamage) return;
     this.player.hull -= amount;
     if (this.player.hull <= 0) {
       this.player.hull = 0;

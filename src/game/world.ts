@@ -86,10 +86,15 @@ export class World {
     return TILE_DEFS[this.getTile(x, y)].hardness !== null;
   }
 
-  /** Remove a diggable tile. Returns what was removed, or null if undiggable. */
-  dig(x: number, y: number): TileId | null {
-    if (!this.isDiggable(x, y)) return null;
+  /**
+   * Remove a diggable tile. Returns what was removed, or null if undiggable.
+   * `force` (dev cheat) digs any solid in-bounds tile, rock included.
+   */
+  dig(x: number, y: number, force = false): TileId | null {
+    if (!this.inBounds(x, y)) return null;
     const tile = this.getTile(x, y);
+    if (!TILE_DEFS[tile].solid) return null;
+    if (!force && TILE_DEFS[tile].hardness === null) return null;
     this.setTile(x, y, TileId.Empty);
     return tile;
   }

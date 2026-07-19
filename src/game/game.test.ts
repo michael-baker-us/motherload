@@ -160,27 +160,50 @@ describe("game state machine", () => {
     expect(game.state).toBe("title");
   });
 
-  it("dev mode pins fuel and funds, and never writes the save", () => {
+  it("fuel and funds cheats pin their stat, and any cheat blocks the save", () => {
     const storage = fakeStorage();
     const game = makeGame(storage);
     game.saveNow();
     const savedBefore = storage.getItem("motherload-save");
 
-    game.toggleDevMode();
+    // Cheats are independent: fuel-only leaves money alone.
+    game.toggleCheat("unlimitedFuel");
     game.player.fuel = 10;
     game.money = 5;
     for (let i = 0; i < 30; i++) game.update(DT, idleInput);
     expect(game.player.fuel).toBeGreaterThan(game.player.maxFuel * 0.99);
+    expect(game.money).toBe(5);
+
+    game.toggleCheat("unlimitedFunds");
+    game.update(DT, idleInput);
     expect(game.money).toBeGreaterThanOrEqual(999999);
 
+    expect(game.devMode).toBe(true);
     game.saveNow();
     expect(storage.getItem("motherload-save")).toBe(savedBefore);
 
-    // Toggling off resumes normal fuel drain.
-    game.toggleDevMode();
+    // Toggling off resumes normal fuel drain and re-enables saving.
+    game.toggleCheat("unlimitedFuel");
+    game.toggleCheat("unlimitedFunds");
+    expect(game.devMode).toBe(false);
     const fuel = game.player.fuel;
     for (let i = 0; i < 60; i++) game.update(DT, idleInput);
     expect(game.player.fuel).toBeLessThan(fuel);
+  });
+
+  it("noDamage cheat ignores hull damage until toggled off", () => {
+    const game = makeGame();
+    for (let i = 0; i < 5; i++) game.update(DT, idleInput);
+    const hull = game.player.hull;
+
+    game.toggleCheat("noDamage");
+    game.applyDamage(9999, "lava");
+    expect(game.player.hull).toBe(hull);
+    expect(game.state).toBe("playing");
+
+    game.toggleCheat("noDamage");
+    game.applyDamage(5, "lava");
+    expect(game.player.hull).toBe(hull - 5);
   });
 
   it("reports the station under a parked pod", () => {
