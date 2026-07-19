@@ -1,4 +1,5 @@
 import { gasChanceAt, lavaChanceAt } from "./hazards";
+import { STATIONS } from "./stations";
 import { MINERAL_BANDS, TILE_DEFS, TileId, bandChanceAt, rockChanceAt } from "./tiles";
 import { mulberry32 } from "./rng";
 
@@ -32,6 +33,16 @@ export class World {
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         this.tiles[y * this.width + x] = this.rollTile(x, y, rand);
+      }
+    }
+    // Bedrock strip under the whole station district — shops and the ground
+    // between them — so none of it can be undermined. Written directly (not
+    // via setTile) so it's part of generation, not the save diff.
+    const stripX0 = Math.min(...STATIONS.map((s) => s.x0));
+    const stripX1 = Math.max(...STATIONS.map((s) => s.x1));
+    for (let x = Math.max(0, stripX0); x <= stripX1 && x < this.width; x++) {
+      for (let y = this.surfaceRow; y <= this.surfaceRow + 1 && y < this.height; y++) {
+        this.tiles[y * this.width + x] = TileId.Rock;
       }
     }
   }

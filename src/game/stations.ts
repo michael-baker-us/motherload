@@ -9,10 +9,11 @@ export interface Station {
   color: string;
 }
 
+// Three 3-tile shops with equal 3-tile gaps, centered on the 60-tile world.
 export const STATIONS: Station[] = [
-  { id: "fuel", label: "FUEL DEPOT", x0: 25, x1: 27, color: "#c94f3d" },
-  { id: "trader", label: "MINERAL TRADER", x0: 32, x1: 34, color: "#3d7fc9" },
-  { id: "upgrades", label: "UPGRADE SHOP", x0: 37, x1: 39, color: "#8a4fc9" },
+  { id: "fuel", label: "FUEL DEPOT", x0: 23, x1: 25, color: "#c94f3d" },
+  { id: "trader", label: "MINERAL TRADER", x0: 29, x1: 31, color: "#3d7fc9" },
+  { id: "upgrades", label: "UPGRADE SHOP", x0: 35, x1: 37, color: "#8a4fc9" },
 ];
 
 /** The station whose footprint overlaps the given tile-column span, if any. */

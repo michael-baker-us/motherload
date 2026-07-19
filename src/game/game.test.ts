@@ -140,7 +140,7 @@ describe("game state machine", () => {
     const first = makeGame(storage);
     first.money = 5000;
     first.buyUpgrade("tank");
-    first.world.dig(30, 6);
+    first.world.dig(10, 6); // outside the station district's bedrock strip
     first.saveNow();
 
     const second = new Game(800, 600, storage);
@@ -149,7 +149,7 @@ describe("game state machine", () => {
     expect(second.state).toBe("playing");
     expect(second.money).toBe(first.money);
     expect(second.player.maxFuel).toBe(160);
-    expect(second.world.getTile(30, 6)).toBe(TileId.Empty);
+    expect(second.world.getTile(10, 6)).toBe(TileId.Empty);
     expect(second.world.tiles).toEqual(first.world.tiles);
   });
 
@@ -185,11 +185,16 @@ describe("game state machine", () => {
 
   it("reports the station under a parked pod", () => {
     const game = makeGame();
-    // Settle onto the surface first.
+    // Settle onto the surface first — the spawn column sits on the trader.
     for (let i = 0; i < 5; i++) game.update(DT, idleInput);
-    expect(game.currentStation()).toBeNull(); // spawn point is between stations
+    expect(game.currentStation()?.id).toBe("trader");
 
-    game.player.x = 26 * 32; // on the fuel depot
+    game.player.x = 27 * 32; // gap between fuel depot and trader
+    game.player.prevX = game.player.x;
+    game.update(DT, idleInput);
+    expect(game.currentStation()).toBeNull();
+
+    game.player.x = 24 * 32; // on the fuel depot
     game.player.prevX = game.player.x;
     game.update(DT, idleInput);
     expect(game.currentStation()?.id).toBe("fuel");

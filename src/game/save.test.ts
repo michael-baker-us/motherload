@@ -29,8 +29,9 @@ function fakeStorage(): SaveStorage & { data: Map<string, string> } {
 describe("save round-trip", () => {
   it("restores dug tiles, pod state, money, and upgrades through JSON", () => {
     const world = makeWorld(7);
-    world.dig(30, 6);
-    world.dig(30, 7);
+    // Column 10 is outside the station district's bedrock strip.
+    world.dig(10, 6);
+    world.dig(10, 7);
     world.setTile(10, 20, TileId.Lava);
 
     const player = createPlayer(world);
@@ -51,7 +52,7 @@ describe("save round-trip", () => {
     const world2 = makeWorld(loaded!.seed);
     applyWorldSave(world2, loaded!);
     expect(world2.tiles).toEqual(world.tiles);
-    expect(world2.getTile(30, 6)).toBe(TileId.Empty);
+    expect(world2.getTile(10, 6)).toBe(TileId.Empty);
     expect(world2.getTile(10, 20)).toBe(TileId.Lava);
 
     const player2 = createPlayer(world2);

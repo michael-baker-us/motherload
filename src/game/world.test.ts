@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STATIONS } from "./stations";
 import { MINERAL_BANDS, TileId } from "./tiles";
 import { World } from "./world";
 
@@ -40,6 +41,25 @@ describe("worldgen", () => {
     }
     for (let x = 0; x < w.width; x++) {
       expect(w.getTile(x, w.height - 1)).toBe(TileId.Rock);
+    }
+  });
+
+  it("puts an undiggable bedrock strip under the whole station district", () => {
+    const w = makeWorld();
+    const x0 = Math.min(...STATIONS.map((s) => s.x0));
+    const x1 = Math.max(...STATIONS.map((s) => s.x1));
+    for (let x = x0; x <= x1; x++) {
+      expect(w.getTile(x, SURFACE)).toBe(TileId.Rock);
+      expect(w.getTile(x, SURFACE + 1)).toBe(TileId.Rock);
+      expect(w.isDiggable(x, SURFACE)).toBe(false);
+    }
+  });
+
+  it("spaces the stations at equal gaps", () => {
+    for (let i = 1; i < STATIONS.length; i++) {
+      const gap = STATIONS[i]!.x0 - STATIONS[i - 1]!.x1 - 1;
+      const firstGap = STATIONS[1]!.x0 - STATIONS[0]!.x1 - 1;
+      expect(gap).toBe(firstGap);
     }
   });
 
