@@ -1,4 +1,4 @@
-import { ECONOMY, FUEL, POD, TILE } from "./config";
+import { ECONOMY, FUEL, HULL, POD, TILE } from "./config";
 import type { Cargo } from "./economy";
 import type { World } from "./world";
 
@@ -25,9 +25,11 @@ export interface Player {
   hasDigTarget: boolean;
   digProgress: number;
   fuel: number;
-  maxFuel: number; // per-player so upgrades can raise it later
+  maxFuel: number; // per-player; upgrades raise it
   cargo: Cargo;
   cargoCapacity: number;
+  hull: number;
+  maxHull: number;
 }
 
 export function createPlayer(world: World): Player {
@@ -57,5 +59,7 @@ export function createPlayer(world: World): Player {
     maxFuel: FUEL.tank,
     cargo: new Map(),
     cargoCapacity: ECONOMY.cargoCapacity,
+    hull: HULL.base,
+    maxHull: HULL.base,
   };
 }

@@ -9,6 +9,8 @@ export enum TileId {
   Goldium,
   Einsteinium,
   Diamond,
+  GasPocket, // renders exactly like dirt — a hidden trap that explodes when dug
+  Lava, // visible hazard; drilling through it burns the hull
 }
 
 export interface TileDef {
@@ -34,6 +36,8 @@ export const TILE_DEFS: Record<TileId, TileDef> = {
   [TileId.Goldium]: { name: "goldium", color: "#f0c020", solid: true, hardness: 0.65, value: 250, cargoUnits: 1 },
   [TileId.Einsteinium]: { name: "einsteinium", color: "#5fd75f", solid: true, hardness: 0.8, value: 800, cargoUnits: 1 },
   [TileId.Diamond]: { name: "diamond", color: "#8ef0e8", solid: true, hardness: 1.0, value: 2000, cargoUnits: 1 },
+  [TileId.GasPocket]: { name: "gas pocket", color: "#7a4a21", solid: true, hardness: 0.25, value: 0, cargoUnits: 0 },
+  [TileId.Lava]: { name: "lava", color: "#ff5a1f", solid: true, hardness: 0.3, value: 0, cargoUnits: 0 },
 };
 
 /**

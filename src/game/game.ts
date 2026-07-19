@@ -3,14 +3,22 @@ import type { Input } from "../engine/input";
 import { lerp } from "../engine/math";
 import { drawHud } from "../ui/hud";
 import { ShopOverlay } from "../ui/shop";
-import { DRILL, ECONOMY, FUEL, TILE, WORLD } from "./config";
+import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
-import { addToCargo, cargoUnits } from "./economy";
+import { addToCargo, cargoUnits, refuelPlan } from "./economy";
+import { digHazard, fallDamage } from "./hazards";
 import { createPlayer, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import { hash2d } from "./rng";
 import { STATIONS, stationInSpan, type Station } from "./stations";
 import { TILE_DEFS, TileId } from "./tiles";
+import {
+  createUpgradeState,
+  currentTier,
+  nextTier,
+  type UpgradeState,
+  type UpgradeTrack,
+} from "./upgrades";
 import { World } from "./world";
 
 export type GameState = "playing" | "shop" | "dead";
@@ -21,6 +29,8 @@ export class Game {
   player: Player;
   money = ECONOMY.startingMoney;
   state: GameState = "playing";
+  /** Owned upgrade tiers — survive pod loss, unlike the pod itself. */
+  readonly upgrades: UpgradeState = createUpgradeState();
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
 
@@ -69,6 +79,13 @@ export class Game {
     this.thrusting = move.thrustUp;
     stepPlayer(p, this.world, move, dt);
 
+    const crash = fallDamage(p.impactSpeed);
+    if (crash > 0) {
+      this.showToast(`HARD LANDING! −${Math.round(crash)} hull`, 2);
+      this.applyDamage(crash, "Hull shattered on impact");
+      if (this.state !== "playing") return;
+    }
+
     const dug = updateDrilling(
       p,
       this.world,
@@ -77,14 +94,21 @@ export class Game {
         left: move.moveLeft,
         right: move.moveRight,
       },
-      DRILL.basePower,
+      this.drillPower,
       dt,
     );
-    if (dug !== null && TILE_DEFS[dug].value > 0) {
-      if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
-        this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
-      } else {
-        this.showToast("CARGO FULL — mineral lost", 2);
+    if (dug !== null) {
+      const hazard = digHazard(dug);
+      if (hazard) {
+        this.showToast(hazard.toast, 2);
+        this.applyDamage(hazard.damage, hazard.cause);
+        if (this.state !== "playing") return;
+      } else if (TILE_DEFS[dug].value > 0) {
+        if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
+          this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
+        } else {
+          this.showToast("CARGO FULL — mineral lost", 2);
+        }
       }
     }
 
@@ -118,18 +142,60 @@ export class Game {
     return stationInSpan(left, right);
   }
 
+  get drillPower(): number {
+    return DRILL.basePower * currentTier("drill", this.upgrades).value;
+  }
+
+  applyDamage(amount: number, cause: string): void {
+    if (this.state !== "playing") return;
+    this.player.hull -= amount;
+    if (this.player.hull <= 0) {
+      this.player.hull = 0;
+      this.die(cause);
+    }
+  }
+
+  /** Buy the next tier of a track. Returns false if maxed or unaffordable. */
+  buyUpgrade(track: UpgradeTrack): boolean {
+    const next = nextTier(track, this.upgrades);
+    if (!next || this.money < next.cost) return false;
+    this.money -= next.cost;
+    this.upgrades[track] += 1;
+    this.applyUpgrades(this.player);
+    if (track === "hull") this.player.hull = this.player.maxHull; // new hull ships repaired
+    return true;
+  }
+
+  /** Repair as much hull as money covers, at HULL.repairPricePerHp. */
+  repairHull(): boolean {
+    const p = this.player;
+    // Same partial-purchase math as fuel: fill what's affordable.
+    const plan = refuelPlan(p.hull, p.maxHull, this.money, HULL.repairPricePerHp);
+    if (plan.units <= 0) return false;
+    p.hull += plan.units;
+    this.money -= plan.cost;
+    return true;
+  }
+
+  /** Push owned upgrade values onto a pod (capacities, not current levels). */
+  private applyUpgrades(p: Player): void {
+    p.maxFuel = currentTier("tank", this.upgrades).value;
+    p.cargoCapacity = currentTier("cargo", this.upgrades).value;
+    p.maxHull = currentTier("hull", this.upgrades).value;
+  }
+
   die(cause: string): void {
     this.state = "dead";
     this.deathCause = cause;
   }
 
-  /** Fresh pod at the surface: full tank, cargo gone, salvage fee charged. */
+  /** Fresh pod at the surface: full tank and hull, cargo gone, salvage fee charged. Upgrades persist. */
   respawn(): void {
     this.money = Math.max(0, this.money - ECONOMY.salvageFee);
     const fresh = createPlayer(this.world);
-    fresh.cargoCapacity = this.player.cargoCapacity;
-    fresh.maxFuel = this.player.maxFuel;
+    this.applyUpgrades(fresh);
     fresh.fuel = fresh.maxFuel;
+    fresh.hull = fresh.maxHull;
     this.player = fresh;
     this.state = "playing";
   }
@@ -158,6 +224,8 @@ export class Game {
       depth: this.depth,
       fuel: p.fuel,
       maxFuel: p.maxFuel,
+      hull: p.hull,
+      maxHull: p.maxHull,
       money: this.money,
       cargoUnits: cargoUnits(p.cargo),
       cargoCapacity: p.cargoCapacity,

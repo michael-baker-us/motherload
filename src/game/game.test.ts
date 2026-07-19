@@ -53,6 +53,64 @@ describe("game state machine", () => {
     expect(game.player.fuel).toBe(fuel);
   });
 
+  it("takes fall damage from a long drop but not a short hop", () => {
+    const game = makeGame();
+    game.player.y -= 64; // two tiles: lands well under the damage threshold
+    for (let i = 0; i < 120; i++) game.update(DT, idleInput);
+    expect(game.player.hull).toBe(game.player.maxHull);
+
+    // Drop from the top of the sky (~168px): impact ≈ 608 px/s, over the threshold.
+    game.player.y = 0;
+    game.player.prevY = 0;
+    game.player.vy = 0;
+    for (let i = 0; i < 180; i++) game.update(DT, idleInput);
+    expect(game.player.hull).toBeLessThan(game.player.maxHull);
+    expect(game.state).toBe("playing"); // hurt, not dead
+  });
+
+  it("dies when damage exceeds hull, with the cause preserved", () => {
+    const game = makeGame();
+    game.applyDamage(game.player.maxHull + 1, "Gas pocket explosion");
+    expect(game.state).toBe("dead");
+    expect(game.player.hull).toBe(0);
+    expect(game.deathCause).toBe("Gas pocket explosion");
+  });
+
+  it("buying upgrades raises pod stats and survives respawn", () => {
+    const game = makeGame();
+    game.money = 10000;
+    expect(game.buyUpgrade("tank")).toBe(true);
+    expect(game.buyUpgrade("drill")).toBe(true);
+    expect(game.player.maxFuel).toBe(160);
+    expect(game.drillPower).toBeCloseTo(1.6);
+
+    game.die("test");
+    game.respawn();
+    expect(game.player.maxFuel).toBe(160); // upgrades outlive the pod
+    expect(game.player.fuel).toBe(160);
+  });
+
+  it("refuses upgrades when broke or maxed", () => {
+    const game = makeGame();
+    game.money = 0;
+    expect(game.buyUpgrade("tank")).toBe(false);
+
+    game.money = 100000;
+    expect(game.buyUpgrade("tank")).toBe(true);
+    expect(game.buyUpgrade("tank")).toBe(true);
+    expect(game.buyUpgrade("tank")).toBe(true);
+    expect(game.buyUpgrade("tank")).toBe(false); // maxed
+  });
+
+  it("repairs hull for money", () => {
+    const game = makeGame();
+    game.money = 100;
+    game.applyDamage(10, "test");
+    expect(game.repairHull()).toBe(true);
+    expect(game.player.hull).toBe(game.player.maxHull);
+    expect(game.money).toBe(100 - 20); // 10 HP at $2/HP
+  });
+
   it("reports the station under a parked pod", () => {
     const game = makeGame();
     // Settle onto the surface first.

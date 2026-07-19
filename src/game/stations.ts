@@ -1,4 +1,4 @@
-export type StationId = "fuel" | "trader";
+export type StationId = "fuel" | "trader" | "upgrades";
 
 export interface Station {
   id: StationId;
@@ -12,6 +12,7 @@ export interface Station {
 export const STATIONS: Station[] = [
   { id: "fuel", label: "FUEL DEPOT", x0: 25, x1: 27, color: "#c94f3d" },
   { id: "trader", label: "MINERAL TRADER", x0: 32, x1: 34, color: "#3d7fc9" },
+  { id: "upgrades", label: "UPGRADE SHOP", x0: 37, x1: 39, color: "#8a4fc9" },
 ];
 
 /** The station whose footprint overlaps the given tile-column span, if any. */

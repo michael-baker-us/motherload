@@ -1,3 +1,4 @@
+import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { MINERAL_BANDS, TILE_DEFS, TileId, bandChanceAt, rockChanceAt } from "./tiles";
 import { mulberry32 } from "./rng";
 
@@ -40,6 +41,8 @@ export class World {
 
     const depth = y - this.surfaceRow;
     if (rand() < rockChanceAt(depth)) return TileId.Rock;
+    if (rand() < gasChanceAt(depth)) return TileId.GasPocket;
+    if (rand() < lavaChanceAt(depth)) return TileId.Lava;
     for (const band of MINERAL_BANDS) {
       if (rand() < bandChanceAt(band, depth)) return band.tile;
     }

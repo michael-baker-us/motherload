@@ -2,6 +2,8 @@ export interface HudData {
   depth: number;
   fuel: number;
   maxFuel: number;
+  hull: number;
+  maxHull: number;
   money: number;
   cargoUnits: number;
   cargoCapacity: number;
@@ -23,18 +25,24 @@ export function drawHud(ctx: CanvasRenderingContext2D, data: HudData): void {
   ];
   const panelWidth = 150;
   ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-  ctx.fillRect(8, 8, panelWidth, 30 + lines.length * 18);
+  ctx.fillRect(8, 8, panelWidth, 46 + lines.length * 18);
 
-  // Fuel bar.
-  const frac = Math.max(0, data.fuel / data.maxFuel);
+  // Fuel bar, then hull bar beneath it.
+  const fuelFrac = Math.max(0, data.fuel / data.maxFuel);
   ctx.fillStyle = "rgba(255,255,255,0.25)";
   ctx.fillRect(16, 16, panelWidth - 16, 10);
-  ctx.fillStyle = frac > 0.5 ? "#5fd75f" : frac > 0.25 ? "#f0c020" : "#e04a3a";
-  ctx.fillRect(16, 16, (panelWidth - 16) * frac, 10);
+  ctx.fillStyle = fuelFrac > 0.5 ? "#5fd75f" : fuelFrac > 0.25 ? "#f0c020" : "#e04a3a";
+  ctx.fillRect(16, 16, (panelWidth - 16) * fuelFrac, 10);
+
+  const hullFrac = Math.max(0, data.hull / data.maxHull);
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.fillRect(16, 30, panelWidth - 16, 10);
+  ctx.fillStyle = hullFrac > 0.35 ? "#6fb7ff" : "#e04a3a";
+  ctx.fillRect(16, 30, (panelWidth - 16) * hullFrac, 10);
 
   ctx.fillStyle = "#ffffff";
   lines.forEach((line, i) => {
-    ctx.fillText(line, 16, 34 + i * 18);
+    ctx.fillText(line, 16, 48 + i * 18);
   });
 
   // Contextual hint above the controls line.

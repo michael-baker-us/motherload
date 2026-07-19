@@ -1,8 +1,16 @@
-import { FUEL } from "../game/config";
+import { FUEL, HULL } from "../game/config";
 import { cargoValue, refuelPlan } from "../game/economy";
 import type { Station } from "../game/stations";
 import { TILE_DEFS } from "../game/tiles";
+import { currentTier, nextTier, UPGRADES, type UpgradeTrack } from "../game/upgrades";
 import type { Game } from "../game/game";
+
+const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
+  drill: (v) => `speed ×${v}`,
+  tank: (v) => `${v} fuel`,
+  cargo: (v) => `${v} units`,
+  hull: (v) => `${v} HP`,
+};
 
 /**
  * DOM overlay for surface stations. The game simulation is paused while
@@ -71,7 +79,8 @@ export class ShopOverlay {
     if (!this.body) return;
     this.body.replaceChildren();
     if (station.id === "fuel") this.renderFuel(station, game);
-    else this.renderTrader(station, game);
+    else if (station.id === "trader") this.renderTrader(station, game);
+    else this.renderUpgrades(station, game);
   }
 
   private renderFuel(station: Station, game: Game): void {
@@ -115,6 +124,39 @@ export class ShopOverlay {
       p.cargo.clear();
       this.render(station, game);
     });
+  }
+
+  private renderUpgrades(station: Station, game: Game): void {
+    const p = game.player;
+    this.line(`Money $${game.money}   Hull ${Math.ceil(p.hull)}/${p.maxHull}`);
+
+    for (const track of Object.keys(UPGRADES) as UpgradeTrack[]) {
+      const owned = currentTier(track, game.upgrades);
+      const next = nextTier(track, game.upgrades);
+      this.line(`${track.toUpperCase().padEnd(6)} ${owned.name} (${TRACK_STAT[track](owned.value)})`);
+      if (next) {
+        this.button(
+          `→ ${next.name} (${TRACK_STAT[track](next.value)}) — $${next.cost}`,
+          game.money >= next.cost,
+          () => {
+            game.buyUpgrade(track);
+            this.render(station, game);
+          },
+        );
+      } else {
+        this.line("       maxed out");
+      }
+    }
+
+    const repair = refuelPlan(p.hull, p.maxHull, game.money, HULL.repairPricePerHp);
+    this.button(
+      repair.units > 0 ? `Repair hull — $${repair.cost}` : "Hull fully repaired",
+      repair.units > 0,
+      () => {
+        game.repairHull();
+        this.render(station, game);
+      },
+    );
   }
 
   private line(text: string): void {

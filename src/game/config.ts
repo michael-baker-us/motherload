@@ -45,3 +45,19 @@ export const ECONOMY = {
   cargoCapacity: 10, // cargo units the bay holds
   salvageFee: 100, // $ charged when the pod is lost
 };
+
+export const HULL = {
+  base: 30,
+  repairPricePerHp: 2, // $ per HP at the upgrade shop
+};
+
+export const HAZARDS = {
+  gasMinDepth: 25, // tiles below surface where gas pockets start
+  gasMaxChance: 0.02,
+  gasDamage: 12,
+  lavaMinDepth: 120,
+  lavaMaxChance: 0.02,
+  lavaDamage: 8,
+  fallThreshold: 480, // px/s of impact the hull absorbs for free
+  fallFactor: 0.08, // HP per px/s beyond the threshold
+};

@@ -47,6 +47,6 @@ Two rules keep it maintainable:
 - [x] M1 — scaffold, game loop, CI + GitHub Pages deploy
 - [x] M2 — movement, digging, worldgen, camera
 - [x] M3 — fuel, cargo, surface stations (sell + refuel), money, death/respawn
-- [ ] M4 — upgrades, hazards (gas pockets, lava), death/respawn
+- [x] M4 — upgrade shop (drill/tank/cargo/hull + repair), gas pockets, lava, fall damage
 - [ ] M5 — save/load, title screen, tuning pass
 - [ ] Later — Tauri wrapper for a native Linux build (Steam Deck)
