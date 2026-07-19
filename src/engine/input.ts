@@ -40,4 +40,10 @@ export class Input {
   endFrame(): void {
     this.pressed.clear();
   }
+
+  /** Drop all key state — call when focus moves to/from an overlay. */
+  reset(): void {
+    this.held.clear();
+    this.pressed.clear();
+  }
 }

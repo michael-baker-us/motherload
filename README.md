@@ -25,7 +25,7 @@ Pushes to `main` deploy to GitHub Pages via `.github/workflows/ci.yml`
 
 ## Architecture
 
-```
+```text
 src/
   engine/       game-agnostic: fixed-timestep loop, input, camera
   game/         all simulation logic — pure of DOM/canvas, unit-tested
@@ -46,7 +46,7 @@ Two rules keep it maintainable:
 
 - [x] M1 — scaffold, game loop, CI + GitHub Pages deploy
 - [x] M2 — movement, digging, worldgen, camera
-- [ ] M3 — fuel, cargo, surface stations (sell + refuel), money
+- [x] M3 — fuel, cargo, surface stations (sell + refuel), money, death/respawn
 - [ ] M4 — upgrades, hazards (gas pockets, lava), death/respawn
 - [ ] M5 — save/load, title screen, tuning pass
 - [ ] Later — Tauri wrapper for a native Linux build (Steam Deck)

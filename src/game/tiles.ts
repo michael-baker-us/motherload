@@ -38,7 +38,10 @@ export const TILE_DEFS: Record<TileId, TileDef> = {
 
 /**
  * Where each mineral spawns. Depth is in tiles below the surface row.
- * Spawn chance ramps triangularly: zero at the band edges, `chance` at the middle.
+ * Spawn chance is trapezoidal: quick ramp-in over the first 15% of the band,
+ * full `chance` through the middle, ramp-out over the last 30%. (A triangular
+ * ramp left the top of each band nearly barren — playtesting found the first
+ * 50m had almost nothing to mine.)
  */
 export interface MineralBand {
   tile: TileId;
@@ -48,7 +51,7 @@ export interface MineralBand {
 }
 
 export const MINERAL_BANDS: MineralBand[] = [
-  { tile: TileId.Ironium, minDepth: 2, maxDepth: 220, chance: 0.05 },
+  { tile: TileId.Ironium, minDepth: 1, maxDepth: 220, chance: 0.06 },
   { tile: TileId.Bronzium, minDepth: 40, maxDepth: 450, chance: 0.04 },
   { tile: TileId.Silverium, minDepth: 150, maxDepth: 800, chance: 0.035 },
   { tile: TileId.Goldium, minDepth: 350, maxDepth: 1200, chance: 0.03 },
@@ -64,5 +67,7 @@ export function rockChanceAt(depth: number): number {
 export function bandChanceAt(band: MineralBand, depth: number): number {
   if (depth < band.minDepth || depth > band.maxDepth) return 0;
   const t = (depth - band.minDepth) / (band.maxDepth - band.minDepth);
-  return band.chance * (1 - Math.abs(2 * t - 1));
+  const rampIn = Math.min(1, t / 0.15);
+  const rampOut = Math.min(1, (1 - t) / 0.3);
+  return band.chance * Math.min(rampIn, rampOut);
 }

@@ -64,6 +64,17 @@ describe("worldgen", () => {
     }
   });
 
+  it("has minerals to find in the first 40m (early game is not barren)", () => {
+    const w = makeWorld();
+    let minerals = 0;
+    for (let y = SURFACE; y < SURFACE + 40; y++) {
+      for (let x = 0; x < w.width; x++) {
+        if (w.getTile(x, y) === TileId.Ironium) minerals++;
+      }
+    }
+    expect(minerals).toBeGreaterThan(20);
+  });
+
   it("spawns each mineral somewhere in the world", () => {
     const w = makeWorld();
     const seen = new Set<number>();

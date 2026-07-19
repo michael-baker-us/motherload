@@ -31,3 +31,17 @@ export const DRILL = {
   // Multiplier on dig speed; tile hardness is seconds-to-dig at power 1.
   basePower: 1,
 };
+
+export const FUEL = {
+  tank: 100,
+  thrustBurn: 6, // units/s while thrusting
+  idleBurn: 0.4, // units/s always
+  digBurn: 2, // extra units/s while drilling
+  pricePerUnit: 1, // $ per fuel unit at the depot
+};
+
+export const ECONOMY = {
+  startingMoney: 25,
+  cargoCapacity: 10, // cargo units the bay holds
+  salvageFee: 100, // $ charged when the pod is lost
+};

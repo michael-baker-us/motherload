@@ -2,21 +2,32 @@ import { Camera } from "../engine/camera";
 import type { Input } from "../engine/input";
 import { lerp } from "../engine/math";
 import { drawHud } from "../ui/hud";
-import { DRILL, TILE, WORLD } from "./config";
+import { ShopOverlay } from "../ui/shop";
+import { DRILL, ECONOMY, FUEL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
+import { addToCargo, cargoUnits } from "./economy";
 import { createPlayer, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import { hash2d } from "./rng";
+import { STATIONS, stationInSpan, type Station } from "./stations";
 import { TILE_DEFS, TileId } from "./tiles";
 import { World } from "./world";
 
+export type GameState = "playing" | "shop" | "dead";
+
 export class Game {
   readonly world: World;
-  readonly player: Player;
   readonly camera: Camera;
-  /** Dug minerals, tallied until the real cargo/economy system lands. */
-  readonly minerals = new Map<TileId, number>();
+  player: Player;
+  money = ECONOMY.startingMoney;
+  state: GameState = "playing";
+  /** Why the pod was lost — shown on the death screen. */
+  deathCause = "";
+
+  private readonly shop = new ShopOverlay();
   private thrusting = false;
+  private toast: { text: string; timeLeft: number } | null = null;
+  private justClosedShop = false;
 
   constructor(viewWidth: number, viewHeight: number) {
     this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, WORLD.seed, TILE);
@@ -35,16 +46,31 @@ export class Game {
   }
 
   update(dt: number, input: Input): void {
+    if (this.toast && (this.toast.timeLeft -= dt) <= 0) this.toast = null;
+
+    if (this.state === "shop") return; // sim paused; the overlay owns input
+    if (this.state === "dead") {
+      if (input.wasPressed("Enter", "Space")) this.respawn();
+      return;
+    }
+    if (this.justClosedShop) {
+      // Keys pressed inside the overlay must not leak into the sim.
+      input.reset();
+      this.justClosedShop = false;
+      return;
+    }
+
+    const p = this.player;
     const move: MoveInput = {
-      thrustUp: input.isDown("ArrowUp", "KeyW", "Space"),
+      thrustUp: input.isDown("ArrowUp", "KeyW", "Space") && p.fuel > 0,
       moveLeft: input.isDown("ArrowLeft", "KeyA"),
       moveRight: input.isDown("ArrowRight", "KeyD"),
     };
     this.thrusting = move.thrustUp;
-    stepPlayer(this.player, this.world, move, dt);
+    stepPlayer(p, this.world, move, dt);
 
     const dug = updateDrilling(
-      this.player,
+      p,
       this.world,
       {
         down: input.isDown("ArrowDown", "KeyS"),
@@ -55,8 +81,61 @@ export class Game {
       dt,
     );
     if (dug !== null && TILE_DEFS[dug].value > 0) {
-      this.minerals.set(dug, (this.minerals.get(dug) ?? 0) + 1);
+      if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
+        this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
+      } else {
+        this.showToast("CARGO FULL — mineral lost", 2);
+      }
     }
+
+    let burn = FUEL.idleBurn;
+    if (this.thrusting) burn += FUEL.thrustBurn;
+    if (p.hasDigTarget) burn += FUEL.digBurn;
+    p.fuel = Math.max(0, p.fuel - burn * dt);
+    if (p.fuel <= 0) {
+      this.die("Out of fuel");
+      return;
+    }
+
+    const station = this.currentStation();
+    if (station && input.wasPressed("Enter", "KeyE")) {
+      this.state = "shop";
+      this.shop.open(station, this, () => {
+        this.state = "playing";
+        this.justClosedShop = true;
+      });
+    }
+  }
+
+  /** The station the pod is parked on, if grounded at the surface. */
+  currentStation(): Station | null {
+    const p = this.player;
+    if (!p.grounded) return null;
+    const feetRow = Math.floor((p.y + p.height + 0.5) / TILE);
+    if (feetRow !== this.world.surfaceRow) return null;
+    const left = Math.floor(p.x / TILE);
+    const right = Math.floor((p.x + p.width) / TILE);
+    return stationInSpan(left, right);
+  }
+
+  die(cause: string): void {
+    this.state = "dead";
+    this.deathCause = cause;
+  }
+
+  /** Fresh pod at the surface: full tank, cargo gone, salvage fee charged. */
+  respawn(): void {
+    this.money = Math.max(0, this.money - ECONOMY.salvageFee);
+    const fresh = createPlayer(this.world);
+    fresh.cargoCapacity = this.player.cargoCapacity;
+    fresh.maxFuel = this.player.maxFuel;
+    fresh.fuel = fresh.maxFuel;
+    this.player = fresh;
+    this.state = "playing";
+  }
+
+  private showToast(text: string, seconds: number): void {
+    this.toast = { text, timeLeft: seconds };
   }
 
   render(ctx: CanvasRenderingContext2D, alpha: number): void {
@@ -73,8 +152,25 @@ export class Game {
 
     this.drawSky(ctx);
     this.drawTiles(ctx);
+    this.drawStations(ctx);
     this.drawPlayer(ctx, px - this.camera.x, py - this.camera.y);
-    drawHud(ctx, { depth: this.depth, minerals: this.minerals });
+    drawHud(ctx, {
+      depth: this.depth,
+      fuel: p.fuel,
+      maxFuel: p.maxFuel,
+      money: this.money,
+      cargoUnits: cargoUnits(p.cargo),
+      cargoCapacity: p.cargoCapacity,
+      hint: this.stationHint(),
+      toast: this.toast,
+    });
+    if (this.state === "dead") this.drawDeathScreen(ctx);
+  }
+
+  private stationHint(): string | null {
+    if (this.state !== "playing") return null;
+    const station = this.currentStation();
+    return station ? `[E] enter ${station.label}` : null;
   }
 
   private drawSky(ctx: CanvasRenderingContext2D): void {
@@ -132,10 +228,35 @@ export class Game {
     }
   }
 
+  private drawStations(ctx: CanvasRenderingContext2D): void {
+    const cam = this.camera;
+    const groundY = this.world.surfaceRow * TILE;
+    for (const s of STATIONS) {
+      const sx = s.x0 * TILE - cam.x;
+      const w = (s.x1 - s.x0 + 1) * TILE;
+      const h = TILE * 2.2;
+      const sy = groundY - h - cam.y;
+      if (sx + w < 0 || sx > cam.viewWidth) continue;
+
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.roundRect(sx, sy, w, h, [6, 6, 0, 0]);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.25)";
+      ctx.fillRect(sx + 8, sy + 10, w - 16, 14);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "11px monospace";
+      ctx.textBaseline = "top";
+      const tw = ctx.measureText(s.label).width;
+      ctx.fillText(s.label, sx + (w - tw) / 2, sy + h - 20);
+      ctx.font = "14px monospace";
+    }
+  }
+
   private drawPlayer(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
     const p = this.player;
 
-    if (this.thrusting) {
+    if (this.thrusting && this.state === "playing") {
       ctx.fillStyle = "#ff9d2e";
       ctx.beginPath();
       ctx.moveTo(sx + p.width * 0.3, sy + p.height);
@@ -174,4 +295,30 @@ export class Game {
     ctx.closePath();
     ctx.fill();
   }
+
+  private drawDeathScreen(ctx: CanvasRenderingContext2D): void {
+    const { viewWidth, viewHeight } = this.camera;
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
+    ctx.fillStyle = "#e04a3a";
+    ctx.font = "28px monospace";
+    ctx.textBaseline = "top";
+    center(ctx, "POD LOST", viewWidth, viewHeight * 0.4);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "15px monospace";
+    center(ctx, this.deathCause, viewWidth, viewHeight * 0.4 + 44);
+    center(
+      ctx,
+      `Salvage fee $${ECONOMY.salvageFee} · cargo lost`,
+      viewWidth,
+      viewHeight * 0.4 + 68,
+    );
+    ctx.fillStyle = "#ffe97a";
+    center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 104);
+    ctx.font = "14px monospace";
+  }
+}
+
+function center(ctx: CanvasRenderingContext2D, text: string, viewWidth: number, y: number): void {
+  ctx.fillText(text, (viewWidth - ctx.measureText(text).width) / 2, y);
 }
