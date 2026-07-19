@@ -26,8 +26,9 @@ export class MenuOverlay {
 
     const panel = document.createElement("div");
     panel.style.cssText =
-      "background:#1c1f24;color:#e8e8e8;border:2px solid #555;border-radius:8px;" +
-      "padding:20px 24px;min-width:340px;";
+      "background:rgba(16,19,26,0.82);backdrop-filter:blur(12px);color:#e8e8e8;" +
+      "border:1px solid rgba(255,255,255,0.14);border-radius:14px;" +
+      "box-shadow:0 18px 50px rgba(0,0,0,0.55);padding:22px 26px;min-width:340px;";
 
     const title = document.createElement("div");
     title.textContent = "SETTINGS";
@@ -92,8 +93,11 @@ export class MenuOverlay {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.style.cssText =
-      "display:block;margin-top:10px;padding:8px 14px;font-family:monospace;font-size:14px;" +
-      `cursor:pointer;background:${background};color:#fff;border:none;border-radius:4px;`;
+      "display:block;margin-top:10px;padding:9px 16px;font-family:monospace;font-size:14px;" +
+      `cursor:pointer;background:${background};color:#fff;border-radius:8px;` +
+      "border:1px solid rgba(255,255,255,0.18);transition:filter 0.12s;";
+    btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.2)"));
+    btn.addEventListener("mouseleave", () => (btn.style.filter = ""));
     btn.addEventListener("click", onClick);
     this.body?.appendChild(btn);
   }

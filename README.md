@@ -59,4 +59,10 @@ Two rules keep it maintainable:
 - [x] M5 — save/load (localStorage autosave at the surface), title screen
 - [x] M6 — visual overhaul: textured tiles, dusk sky + parallax hills, headlight
       lighting at depth, particles, camera shake, pod & station sprites
+- [x] M7 — polish pass: smooth look-ahead camera, soft tunnel AO, additive
+      glow (flame/lava/glints/explosions), starfield + clouds + haze, animated
+      glass HUD, damage flash, dust motes in the headlight
+- [x] M8 — art pass: 1.6× world zoom, 2× supersampled tile art (gem shards,
+      lava crack networks, rubble), detailed station buildings with neon signs
+      and props, pod outline/seams/headlamp, glass shop overlays
 - [ ] Later — Tauri wrapper for a native Linux build (Steam Deck)

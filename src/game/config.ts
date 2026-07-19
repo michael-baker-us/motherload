@@ -5,6 +5,10 @@
 
 export const TILE = 32;
 
+export const VIEW = {
+  zoom: 1.6, // world magnification; the HUD stays at native resolution
+};
+
 export const WORLD = {
   width: 60, // tiles
   height: 2000, // tiles

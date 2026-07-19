@@ -25,7 +25,9 @@ function resize(): void {
   canvas!.height = Math.round(window.innerHeight * dpr);
   // Draw in CSS-pixel coordinates; the transform handles high-DPI scaling.
   ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx!.imageSmoothingEnabled = false;
+  // Tile art is baked at 2x supersample, so smoothing on the downscale is
+  // what keeps it crisp — nearest-neighbor causes seams under the world zoom.
+  ctx!.imageSmoothingEnabled = true;
   game.resize(window.innerWidth, window.innerHeight);
 }
 window.addEventListener("resize", resize);

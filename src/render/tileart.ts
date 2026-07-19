@@ -3,66 +3,101 @@ import { mulberry32 } from "../game/rng";
 import { TILE_DEFS, TileId } from "../game/tiles";
 
 /**
- * Pre-rendered tile textures: each tile type gets a few 32px variants painted
- * once at startup, then blitted with drawImage. Procedural texture beats flat
- * rects and costs nothing per frame.
+ * Pre-rendered tile textures, painted once at startup and blitted per frame.
+ * Baked at 2x supersample so they stay crisp under the world zoom.
  */
 
 export const TILE_VARIANTS = 4;
+
+/** Supersample factor for baked art. */
+const S = 2;
 
 export type TileTextures = Map<TileId, HTMLCanvasElement[]>;
 
 function makeCanvas(): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement("canvas");
-  canvas.width = TILE;
-  canvas.height = TILE;
-  return [canvas, canvas.getContext("2d")!];
+  canvas.width = TILE * S;
+  canvas.height = TILE * S;
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(S, S); // painters keep working in 32px coordinates
+  return [canvas, ctx];
 }
 
 /** Scale a #rrggbb color's brightness by f (>1 lightens). */
 export function shade(hex: string, f: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.min(255, Math.round(r * f))},${Math.min(255, Math.round(g * f))},${Math.min(255, Math.round(b * f))})`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
-  const r = Math.min(255, Math.round(((n >> 16) & 255) * f));
-  const g = Math.min(255, Math.round(((n >> 8) & 255) * f));
-  const b = Math.min(255, Math.round((n & 255) * f));
-  return `rgb(${r},${g},${b})`;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgba(hex: string, a: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/** shade() but returning hex-compatible input for rgba(). */
+function shadeHex(hex: string, f: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  const c = (v: number): string => Math.min(255, Math.round(v * f)).toString(16).padStart(2, "0");
+  return `#${c(r)}${c(g)}${c(b)}`;
 }
 
 function paintDirtBase(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, TILE, TILE);
   // Strata: faint horizontal bands.
-  for (let i = 0; i < 2; i++) {
-    ctx.fillStyle = `rgba(0,0,0,${0.05 + rand() * 0.05})`;
-    ctx.fillRect(0, Math.floor(rand() * TILE), TILE, 2 + Math.floor(rand() * 3));
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = `rgba(0,0,0,${0.04 + rand() * 0.06})`;
+    ctx.fillRect(0, Math.floor(rand() * TILE), TILE, 1.5 + rand() * 3);
   }
-  // Speckles: pebbles and grit.
-  for (let i = 0; i < 42; i++) {
+  // Grit.
+  for (let i = 0; i < 55; i++) {
     const light = rand() > 0.5;
-    ctx.fillStyle = light ? `rgba(255,210,170,${0.05 + rand() * 0.1})` : `rgba(20,5,0,${0.08 + rand() * 0.14})`;
-    const s = rand() > 0.85 ? 2 : 1;
-    ctx.fillRect(Math.floor(rand() * TILE), Math.floor(rand() * TILE), s, s);
+    ctx.fillStyle = light
+      ? `rgba(255,210,170,${0.05 + rand() * 0.09})`
+      : `rgba(20,5,0,${0.08 + rand() * 0.13})`;
+    const s = rand() > 0.85 ? 1.6 : 0.9;
+    ctx.fillRect(rand() * TILE, rand() * TILE, s, s);
+  }
+  // A few subtle embedded pebbles — low contrast so they read as texture,
+  // not polka dots.
+  for (let i = 0; i < 2 + Math.floor(rand() * 2); i++) {
+    const px = rand() * TILE;
+    const py = rand() * TILE;
+    const pr = 1.2 + rand() * 1.4;
+    ctx.fillStyle = rgba(shadeHex(base, 0.75), 0.55);
+    ctx.beginPath();
+    ctx.ellipse(px, py, pr, pr * 0.75, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,215,175,0.14)";
+    ctx.beginPath();
+    ctx.ellipse(px - pr * 0.25, py - pr * 0.3, pr * 0.4, pr * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
 function paintRock(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
   ctx.fillStyle = shade(base, 0.9 + rand() * 0.2);
   ctx.fillRect(0, 0, TILE, TILE);
-  // Lighter facets.
-  for (let i = 0; i < 3; i++) {
-    ctx.fillStyle = `rgba(255,255,255,${0.04 + rand() * 0.05})`;
+  // Angular facets.
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = rand() > 0.5 ? `rgba(255,255,255,${0.04 + rand() * 0.06})` : `rgba(0,0,0,${0.06 + rand() * 0.08})`;
     const x = rand() * TILE;
     const y = rand() * TILE;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + 4 + rand() * 10, y + rand() * 4);
-    ctx.lineTo(x + rand() * 8, y + 4 + rand() * 8);
+    ctx.lineTo(x + 5 + rand() * 12, y + rand() * 5);
+    ctx.lineTo(x + rand() * 10, y + 5 + rand() * 10);
     ctx.closePath();
     ctx.fill();
   }
   // Cracks.
-  ctx.strokeStyle = "rgba(0,0,0,0.35)";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(0,0,0,0.4)";
+  ctx.lineWidth = 0.8;
   for (let i = 0; i < 2; i++) {
     ctx.beginPath();
     let x = rand() * TILE;
@@ -75,20 +110,47 @@ function paintRock(ctx: CanvasRenderingContext2D, rand: () => number, base: stri
     }
     ctx.stroke();
   }
+  // Bevel: lit top-left, shadowed bottom-right.
+  ctx.fillStyle = "rgba(255,255,255,0.11)";
+  ctx.fillRect(0, 0, TILE, 2);
+  ctx.fillRect(0, 0, 2, TILE);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(0, TILE - 2, TILE, 2);
+  ctx.fillRect(TILE - 2, 0, 2, TILE);
 }
 
-function paintTunnel(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
+function paintTunnel(
+  ctx: CanvasRenderingContext2D,
+  rand: () => number,
+  base: string,
+  rubble: boolean,
+): void {
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, TILE, TILE);
   const grad = ctx.createLinearGradient(0, 0, 0, TILE);
-  grad.addColorStop(0, "rgba(0,0,0,0.25)");
+  grad.addColorStop(0, "rgba(0,0,0,0.28)");
   grad.addColorStop(0.5, "rgba(0,0,0,0)");
-  grad.addColorStop(1, "rgba(0,0,0,0.3)");
+  grad.addColorStop(1, "rgba(0,0,0,0.32)");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, TILE, TILE);
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 16; i++) {
     ctx.fillStyle = `rgba(120,80,50,${0.04 + rand() * 0.06})`;
-    ctx.fillRect(Math.floor(rand() * TILE), Math.floor(rand() * TILE), 1, 1);
+    ctx.fillRect(rand() * TILE, rand() * TILE, 1, 1);
+  }
+  if (rubble) {
+    // Loose spoil left on the tunnel floor.
+    for (let i = 0; i < 3; i++) {
+      const rx = 4 + rand() * 24;
+      const rr = 1.5 + rand() * 2.5;
+      ctx.fillStyle = `rgba(58,34,16,0.9)`;
+      ctx.beginPath();
+      ctx.ellipse(rx, TILE - rr * 0.6, rr, rr * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(150,100,60,0.35)";
+      ctx.beginPath();
+      ctx.ellipse(rx - rr * 0.3, TILE - rr * 0.9, rr * 0.4, rr * 0.25, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -99,24 +161,45 @@ function paintMineral(
   color: string,
 ): void {
   paintDirtBase(ctx, rand, dirtBase);
-  const count = 4 + Math.floor(rand() * 3);
-  for (let i = 0; i < count; i++) {
-    const cx = 8 + rand() * 16;
-    const cy = 8 + rand() * 16;
-    const size = 3 + rand() * 4;
+
+  // Soft baked glow so ore reads even in gloom.
+  const glow = ctx.createRadialGradient(16, 16, 2, 16, 16, 15);
+  glow.addColorStop(0, rgba(color, 0.32));
+  glow.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, TILE, TILE);
+
+  // Crystal shards clustered around the center.
+  const shards = 5 + Math.floor(rand() * 3);
+  for (let i = 0; i < shards; i++) {
+    const cx = 9 + rand() * 14;
+    const cy = 9 + rand() * 14;
+    const len = 4.5 + rand() * 4.5;
+    const w = 2 + rand() * 1.8;
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rand() * Math.PI);
-    // Crystal: dark outline, colored body, bright facet.
-    ctx.fillStyle = shade(color, 0.45);
-    ctx.fillRect(-size / 2 - 1, -size / 2 - 1, size + 2, size + 2);
+    ctx.rotate(rand() * Math.PI * 2);
+
+    const kite = (scale: number): void => {
+      ctx.beginPath();
+      ctx.moveTo(0, -len * scale);
+      ctx.lineTo(w * scale, 0);
+      ctx.lineTo(0, len * 0.45 * scale);
+      ctx.lineTo(-w * scale, 0);
+      ctx.closePath();
+    };
+    ctx.fillStyle = shade(color, 0.4);
+    kite(1.25);
+    ctx.fill();
     ctx.fillStyle = color;
-    ctx.fillRect(-size / 2, -size / 2, size, size);
-    ctx.fillStyle = shade(color, 1.6);
+    kite(1);
+    ctx.fill();
+    // Facet highlight on one flank.
+    ctx.fillStyle = shade(color, 1.7);
     ctx.beginPath();
-    ctx.moveTo(-size / 2, -size / 2);
-    ctx.lineTo(size / 2, -size / 2);
-    ctx.lineTo(-size / 2, size / 2);
+    ctx.moveTo(0, -len);
+    ctx.lineTo(-w, 0);
+    ctx.lineTo(0, 0);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -124,21 +207,43 @@ function paintMineral(
 }
 
 function paintLava(ctx: CanvasRenderingContext2D, rand: () => number): void {
-  ctx.fillStyle = "#6e1608";
+  // Cooled crust with glowing crack network — the runtime pulse lights it up.
+  ctx.fillStyle = "#45140a";
   ctx.fillRect(0, 0, TILE, TILE);
-  for (let i = 0; i < 5; i++) {
-    const x = rand() * TILE;
-    const y = rand() * TILE;
-    const r = 4 + rand() * 6;
-    ctx.fillStyle = "#e8481a";
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffc040";
-    ctx.beginPath();
-    ctx.arc(x, y, r * 0.45, 0, Math.PI * 2);
-    ctx.fill();
+  for (let i = 0; i < 24; i++) {
+    ctx.fillStyle = `rgba(0,0,0,${0.1 + rand() * 0.15})`;
+    ctx.fillRect(rand() * TILE, rand() * TILE, 2 + rand() * 3, 1.5 + rand() * 2);
   }
+  for (let i = 0; i < 3; i++) {
+    let x = rand() * TILE;
+    let y = rand() * TILE;
+    const path: [number, number][] = [[x, y]];
+    for (let s = 0; s < 4; s++) {
+      x += (rand() - 0.5) * 20;
+      y += (rand() - 0.5) * 20;
+      path.push([x, y]);
+    }
+    const draw = (width: number, style: string): void => {
+      ctx.strokeStyle = style;
+      ctx.lineWidth = width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(path[0]![0], path[0]![1]);
+      for (const [px, py] of path.slice(1)) ctx.lineTo(px, py);
+      ctx.stroke();
+    };
+    draw(3, "#e8481a");
+    draw(1.2, "#ffd040");
+  }
+  // Molten pool.
+  const px = 8 + rand() * 16;
+  const py = 8 + rand() * 16;
+  const pool = ctx.createRadialGradient(px, py, 1, px, py, 7);
+  pool.addColorStop(0, "#ffd040");
+  pool.addColorStop(0.5, "#ff7a20");
+  pool.addColorStop(1, "rgba(232,72,26,0)");
+  ctx.fillStyle = pool;
+  ctx.fillRect(px - 7, py - 7, 14, 14);
 }
 
 export function makeTileTextures(): TileTextures {
@@ -146,11 +251,14 @@ export function makeTileTextures(): TileTextures {
   const textures: TileTextures = new Map();
   const dirtBase = TILE_DEFS[TileId.Dirt].color;
 
-  const paint = (tile: TileId, painter: (ctx: CanvasRenderingContext2D, r: () => number) => void): void => {
+  const paint = (
+    tile: TileId,
+    painter: (ctx: CanvasRenderingContext2D, r: () => number, variant: number) => void,
+  ): void => {
     const variants: HTMLCanvasElement[] = [];
     for (let v = 0; v < TILE_VARIANTS; v++) {
       const [canvas, ctx] = makeCanvas();
-      painter(ctx, rand);
+      painter(ctx, rand, v);
       variants.push(canvas);
     }
     textures.set(tile, variants);
@@ -158,7 +266,7 @@ export function makeTileTextures(): TileTextures {
 
   paint(TileId.Dirt, (ctx, r) => paintDirtBase(ctx, r, shade(dirtBase, 0.92 + r() * 0.16)));
   paint(TileId.Rock, (ctx, r) => paintRock(ctx, r, TILE_DEFS[TileId.Rock].color));
-  paint(TileId.Empty, (ctx, r) => paintTunnel(ctx, r, TILE_DEFS[TileId.Empty].color));
+  paint(TileId.Empty, (ctx, r, v) => paintTunnel(ctx, r, TILE_DEFS[TileId.Empty].color, v % 2 === 1));
   paint(TileId.Lava, (ctx, r) => paintLava(ctx, r));
   for (const tile of [
     TileId.Ironium,

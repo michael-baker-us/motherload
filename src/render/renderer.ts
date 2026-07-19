@@ -1,11 +1,12 @@
 import { clamp, lerp } from "../engine/math";
-import { ECONOMY, TILE } from "../game/config";
+import { ECONOMY, TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
-import { TileId } from "../game/tiles";
-import { drawHud } from "../ui/hud";
+import { TILE_DEFS, TileId } from "../game/tiles";
+import { Hud } from "../ui/hud";
+import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
 
 interface Particle {
@@ -18,28 +19,49 @@ interface Particle {
   size: number;
   color: string;
   gravity: number;
+  /** Rendered with "lighter" compositing — for anything that emits light. */
+  additive: boolean;
 }
 
 const MAX_PARTICLES = 400;
+const ZOOM = VIEW.zoom;
 
 // Darkness ramps in from this depth (tiles) and saturates over the next DARK_RAMP.
 const DARK_START = 4;
 const DARK_RAMP = 70;
-const LIGHT_RADIUS = 230;
+const LIGHT_RADIUS = 165; // world px; multiplied by ZOOM on screen
 
 /**
  * All drawing lives here; Game stays logic-only (and node-testable). The
- * renderer owns purely cosmetic state: textures, particles, camera shake.
+ * renderer owns purely cosmetic state: textures, particles, camera smoothing,
+ * shake, flash, and the drill/HUD animations.
  */
 export class Renderer {
   private readonly textures: TileTextures;
+  private readonly sky = new Sky();
+  private readonly hud = new Hud();
   private readonly lightCanvas = document.createElement("canvas");
-  private readonly hills: { points: number[]; parallax: number; color: string; base: number }[];
+  // Baked overlays: soft tunnel shadows per exposed side, sunlit crust, glows.
+  private readonly shadeTop = bakeEdge(0, -1);
+  private readonly shadeBottom = bakeEdge(0, 1);
+  private readonly shadeLeft = bakeEdge(-1, 0);
+  private readonly shadeRight = bakeEdge(1, 0);
+  private readonly crust = bakeCrust();
+  private readonly lavaGlow = bakeGlow(96, 255, 120, 30);
+  private readonly warmGlow = bakeGlow(48, 255, 210, 130);
+  private readonly motes: { ox: number; oy: number; phase: number }[] = [];
+
   private particles: Particle[] = [];
   private shake = 0;
+  private flash = 0;
+  private darkness = 0;
   private time = 0;
   private frameDt = 0;
   private lastNow = performance.now();
+  // Smoothed camera with velocity look-ahead.
+  private camReady = false;
+  private camX = 0;
+  private camY = 0;
   // Drill orientation is sticky: it holds its last dig direction briefly and
   // swings between orientations instead of snapping, so chained side-digs
   // (dig → roll to next wall → dig) don't flicker the drill down and back.
@@ -49,18 +71,10 @@ export class Renderer {
 
   constructor() {
     this.textures = makeTileTextures();
-    // Two silhouette ridge lines for the horizon, generated once.
-    const rand = mulberry32(4242);
-    const ridge = (parallax: number, color: string, base: number) => {
-      const points: number[] = [];
-      let h = 30 + rand() * 20;
-      for (let i = 0; i <= 80; i++) {
-        h = clamp(h + (rand() - 0.5) * 22, 8, 78);
-        points.push(h);
-      }
-      return { points, parallax, color, base };
-    };
-    this.hills = [ridge(0.15, "#6e3a28", 46), ridge(0.35, "#54291c", 20)];
+    const rand = mulberry32(77);
+    for (let i = 0; i < 22; i++) {
+      this.motes.push({ ox: rand() * 2 - 1, oy: rand() * 2 - 1, phase: rand() * Math.PI * 2 });
+    }
   }
 
   render(ctx: CanvasRenderingContext2D, game: Game, alpha: number): void {
@@ -74,46 +88,80 @@ export class Renderer {
     const p = game.player;
     const px = lerp(p.prevX, p.x, alpha);
     const py = lerp(p.prevY, p.y, alpha);
-    cam.follow(px + p.width / 2, py + p.height / 2, game.world.pixelWidth, game.world.pixelHeight);
+
+    // The world renders magnified; the camera works in world units sized to
+    // the zoomed viewport. HUD and post effects stay at native resolution.
+    const screenW = ctx.canvas.clientWidth;
+    const screenH = ctx.canvas.clientHeight;
+    cam.resize(screenW / ZOOM, screenH / ZOOM);
+
+    // Camera: aim ahead of the pod's velocity, then ease toward the target.
+    const lookX = clamp(p.vx * 0.3, -80, 80);
+    const lookY = clamp(p.vy * 0.22, -45, 70);
+    cam.follow(
+      px + p.width / 2 + lookX,
+      py + p.height / 2 + lookY,
+      game.world.pixelWidth,
+      game.world.pixelHeight,
+    );
+    if (!this.camReady) {
+      this.camX = cam.x;
+      this.camY = cam.y;
+      this.camReady = true;
+    }
+    const camEase = 1 - Math.exp(-5.5 * dt);
+    this.camX += (cam.x - this.camX) * camEase;
+    this.camY += (cam.y - this.camY) * camEase;
+    cam.x = this.camX;
+    cam.y = this.camY;
 
     this.consumeFx(game.fxEvents);
     this.emitContinuousFx(game, px, py);
     this.updateParticles(dt);
+    // Fine tremor while the drill is biting, decaying shake otherwise.
+    if (p.hasDigTarget && game.state === "playing") this.shake = Math.max(this.shake, 0.1);
     this.shake = Math.max(0, this.shake - dt * 1.6);
-
-    this.drawSky(ctx, game);
+    this.flash = Math.max(0, this.flash - dt * 2.2);
 
     const shakeMag = this.shake * this.shake * 22;
-    const shakeX = (Math.random() - 0.5) * shakeMag;
-    const shakeY = (Math.random() - 0.5) * shakeMag;
     ctx.save();
-    ctx.translate(shakeX, shakeY);
+    ctx.scale(ZOOM, ZOOM);
+    ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
+    this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time);
     this.drawTiles(ctx, game);
     this.drawStations(ctx, game);
     this.drawPod(ctx, game, px - cam.x, py - cam.y);
     this.drawParticles(ctx, game);
+    this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
     ctx.restore();
 
-    this.applyLighting(ctx, game, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
-    this.drawVignette(ctx, game);
+    const podScreenX = (px - cam.x + p.width / 2) * ZOOM;
+    const podScreenY = (py - cam.y + p.height / 2) * ZOOM;
+    this.applyLighting(ctx, game, podScreenX, podScreenY, screenW, screenH);
+    this.drawVignette(ctx, screenW, screenH);
+    if (this.flash > 0) this.drawFlash(ctx, screenW, screenH);
 
     if (game.state === "title") {
       this.drawTitleScreen(ctx, game);
       return;
     }
-    drawHud(ctx, {
-      depth: game.depth,
-      fuel: p.fuel,
-      maxFuel: p.maxFuel,
-      hull: p.hull,
-      maxHull: p.maxHull,
-      money: game.money,
-      cargoUnits: cargoUnits(p.cargo),
-      cargoCapacity: p.cargoCapacity,
-      hint: game.stationHint(),
-      toast: game.toast,
-      dev: game.devMode,
-    });
+    this.hud.draw(
+      ctx,
+      {
+        depth: game.depth,
+        fuel: p.fuel,
+        maxFuel: p.maxFuel,
+        hull: p.hull,
+        maxHull: p.maxHull,
+        money: game.money,
+        cargoUnits: cargoUnits(p.cargo),
+        cargoCapacity: p.cargoCapacity,
+        hint: game.stationHint(),
+        toast: game.toast,
+        dev: game.devMode,
+      },
+      dt,
+    );
     if (game.state === "dead") this.drawDeathScreen(ctx, game);
   }
 
@@ -122,17 +170,19 @@ export class Renderer {
   private consumeFx(events: FxEvent[]): void {
     for (const e of events) {
       if (e.kind === "dug") {
-        this.burst(e.x, e.y, 10, e.color ?? "#8a4a2a", 90, 700);
+        this.burst(e.x, e.y, 10, e.color ?? "#8a4a2a", 90, 700, false);
       } else if (e.kind === "impact") {
-        this.burst(e.x, e.y, 14, "#a4643c", 130, 300);
+        this.burst(e.x, e.y, 14, "#a4643c", 130, 300, false);
         this.shake = Math.max(this.shake, clamp((e.power ?? 0) / 60, 0.25, 0.6));
+        this.flash = Math.max(this.flash, 0.45);
       } else if (e.kind === "explosion") {
-        this.burst(e.x, e.y, 26, "#ff9d2e", 220, 200);
-        this.burst(e.x, e.y, 12, "#ffe97a", 160, 100);
+        this.burst(e.x, e.y, 26, "#ff9d2e", 220, 200, true);
+        this.burst(e.x, e.y, 12, "#ffe97a", 160, 100, true);
         this.shake = Math.max(this.shake, 0.6);
+        this.flash = Math.max(this.flash, 0.8);
       } else if (e.kind === "upgrade") {
-        this.burst(e.x, e.y, 20, "#ffe97a", 140, -40);
-        this.burst(e.x, e.y, 8, "#ffffff", 90, -40);
+        this.burst(e.x, e.y, 20, "#ffe97a", 140, -40, true);
+        this.burst(e.x, e.y, 8, "#ffffff", 90, -40, true);
       }
     }
     events.length = 0;
@@ -150,11 +200,13 @@ export class Renderer {
         life: 0.5,
         maxLife: 0.5,
         size: 2 + Math.random() * 2,
-        color: Math.random() > 0.4 ? "#8a8078" : "#ff9d2e",
+        color: Math.random() > 0.45 ? "#8a8078" : "#ff9d2e",
         gravity: -60,
+        additive: Math.random() > 0.6,
       });
     }
     if (p.hasDigTarget && Math.random() > 0.35) {
+      const sparky = Math.random() > 0.7;
       this.spawn({
         x: p.digTargetX * TILE + TILE / 2 + (Math.random() - 0.5) * 16,
         y: p.digTargetY * TILE + TILE / 2 + (Math.random() - 0.5) * 16,
@@ -162,14 +214,23 @@ export class Renderer {
         vy: -40 - Math.random() * 60,
         life: 0.4,
         maxLife: 0.4,
-        size: 1.5 + Math.random() * 1.5,
-        color: "#a4643c",
+        size: sparky ? 1.2 : 1.5 + Math.random() * 1.5,
+        color: sparky ? "#ffd080" : "#a4643c",
         gravity: 500,
+        additive: sparky,
       });
     }
   }
 
-  private burst(x: number, y: number, count: number, color: string, speed: number, gravity: number): void {
+  private burst(
+    x: number,
+    y: number,
+    count: number,
+    color: string,
+    speed: number,
+    gravity: number,
+    additive: boolean,
+  ): void {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const v = speed * (0.4 + Math.random() * 0.6);
@@ -184,6 +245,7 @@ export class Renderer {
         size: 1.5 + Math.random() * 2.5,
         color,
         gravity,
+        additive,
       });
     }
   }
@@ -205,55 +267,20 @@ export class Renderer {
 
   private drawParticles(ctx: CanvasRenderingContext2D, game: Game): void {
     const cam = game.camera;
-    for (const p of this.particles) {
-      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
+    for (const pass of [false, true] as const) {
+      if (pass) ctx.globalCompositeOperation = "lighter";
+      for (const p of this.particles) {
+        if (p.additive !== pass) continue;
+        ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
+      }
+      if (pass) ctx.globalCompositeOperation = "source-over";
     }
     ctx.globalAlpha = 1;
   }
 
   // --- World ---------------------------------------------------------------
-
-  private drawSky(ctx: CanvasRenderingContext2D, game: Game): void {
-    const cam = game.camera;
-    const grad = ctx.createLinearGradient(0, 0, 0, cam.viewHeight);
-    grad.addColorStop(0, "#1d2b4a");
-    grad.addColorStop(0.55, "#5d7ba0");
-    grad.addColorStop(1, "#d98e5f");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, cam.viewWidth, cam.viewHeight);
-
-    // Sun, drifting slightly with the camera for depth.
-    const sunX = cam.viewWidth * 0.72 - cam.x * 0.08;
-    const sunY = 90 - cam.y * 0.08;
-    const glow = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 70);
-    glow.addColorStop(0, "rgba(255,242,208,0.95)");
-    glow.addColorStop(0.25, "rgba(255,220,170,0.45)");
-    glow.addColorStop(1, "rgba(255,220,170,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(sunX - 70, sunY - 70, 140, 140);
-
-    // Parallax ridge silhouettes along the horizon.
-    const horizonY = game.world.surfaceRow * TILE - cam.y;
-    if (horizonY > -20) {
-      for (const hill of this.hills) {
-        ctx.fillStyle = hill.color;
-        ctx.beginPath();
-        const step = 26;
-        const offset = cam.x * hill.parallax;
-        ctx.moveTo(0, horizonY);
-        for (let sx = 0; sx <= cam.viewWidth + step; sx += step) {
-          const i = Math.floor((sx + offset) / step);
-          const h = hill.points[((i % hill.points.length) + hill.points.length) % hill.points.length]!;
-          ctx.lineTo(sx, horizonY - hill.base - h);
-        }
-        ctx.lineTo(cam.viewWidth, horizonY);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-  }
 
   private drawTiles(ctx: CanvasRenderingContext2D, game: Game): void {
     const cam = game.camera;
@@ -273,46 +300,82 @@ export class Renderer {
         const variants = this.textures.get(tile);
         if (variants) {
           const v = Math.floor(hash2d(tx, ty, 7) * TILE_VARIANTS) % TILE_VARIANTS;
-          ctx.drawImage(variants[v]!, sx, sy);
+          // Half-pixel bleed hides antialiasing seams at fractional zoom offsets.
+          ctx.drawImage(variants[v]!, sx, sy, TILE + 0.5, TILE + 0.5);
         }
+
+        if (tile === TileId.Empty) {
+          // Soft ambient occlusion: baked gradient shadow on each walled side.
+          if (world.isSolid(tx, ty - 1)) ctx.drawImage(this.shadeTop, sx, sy);
+          if (world.isSolid(tx, ty + 1)) ctx.drawImage(this.shadeBottom, sx, sy);
+          if (world.isSolid(tx - 1, ty)) ctx.drawImage(this.shadeLeft, sx, sy);
+          if (world.isSolid(tx + 1, ty)) ctx.drawImage(this.shadeRight, sx, sy);
+          continue;
+        }
+
+        // Sunlit crust on any solid tile exposed from above.
+        if (!world.isSolid(tx, ty - 1)) ctx.drawImage(this.crust, sx, sy);
 
         if (tile === TileId.Lava) {
-          // Slow pulse so lava reads as alive.
-          ctx.globalAlpha = 0.18 + 0.14 * Math.sin(this.time * 2.5 + hash2d(tx, ty, 3) * 6);
-          ctx.fillStyle = "#ffb040";
-          ctx.fillRect(sx, sy, TILE, TILE);
+          const pulse = 0.55 + 0.35 * Math.sin(this.time * 2.5 + hash2d(tx, ty, 3) * 6);
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = pulse;
+          ctx.drawImage(this.lavaGlow, sx + TILE / 2 - 48, sy + TILE / 2 - 48);
           ctx.globalAlpha = 1;
-        }
-
-        // Exposed-edge shading gives tunnels and cliffs definition.
-        if (tile !== TileId.Empty) {
-          if (!world.isSolid(tx, ty - 1)) {
-            ctx.fillStyle = "rgba(255,230,200,0.16)";
-            ctx.fillRect(sx, sy, TILE, 3);
-          }
-          if (!world.isSolid(tx, ty + 1)) {
-            ctx.fillStyle = "rgba(0,0,0,0.3)";
-            ctx.fillRect(sx, sy + TILE - 3, TILE, 3);
-          }
-          if (!world.isSolid(tx - 1, ty)) {
-            ctx.fillStyle = "rgba(0,0,0,0.18)";
-            ctx.fillRect(sx, sy, 2, TILE);
-          }
-          if (!world.isSolid(tx + 1, ty)) {
-            ctx.fillStyle = "rgba(0,0,0,0.18)";
-            ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
+          ctx.globalCompositeOperation = "source-over";
+        } else if (TILE_DEFS[tile].value > 0) {
+          // Occasional glint so ore catches the eye.
+          const cycle = (this.time * 0.5 + hash2d(tx, ty, 11) * 7) % 7;
+          if (cycle < 0.5) {
+            const a = Math.sin((cycle / 0.5) * Math.PI);
+            const gx = sx + 8 + hash2d(tx, ty, 13) * 16;
+            const gy = sy + 8 + hash2d(tx, ty, 17) * 16;
+            ctx.globalCompositeOperation = "lighter";
+            ctx.strokeStyle = `rgba(255,255,255,${(a * 0.85).toFixed(3)})`;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(gx - 4, gy);
+            ctx.lineTo(gx + 4, gy);
+            ctx.moveTo(gx, gy - 4);
+            ctx.lineTo(gx, gy + 4);
+            ctx.stroke();
+            ctx.globalCompositeOperation = "source-over";
           }
         }
       }
     }
 
-    // Active dig target: the hole opens with progress.
+    // Active dig target: cracks spread, then the hole opens.
     const p = game.player;
     if (p.hasDigTarget) {
-      ctx.globalAlpha = clamp(p.digProgress, 0, 1);
-      const tunnel = this.textures.get(TileId.Empty)!;
-      ctx.drawImage(tunnel[0]!, p.digTargetX * TILE - cam.x, p.digTargetY * TILE - cam.y);
+      const sx = p.digTargetX * TILE - cam.x;
+      const sy = p.digTargetY * TILE - cam.y;
+      const rand = mulberry32((p.digTargetX * 7919) ^ (p.digTargetY * 104729));
+      const cracks = 1 + Math.floor(clamp(p.digProgress, 0, 1) * 3);
+      ctx.strokeStyle = "rgba(12,5,0,0.6)";
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < cracks; i++) {
+        let cx = sx + 10 + rand() * 12;
+        let cy = sy + 10 + rand() * 12;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        for (let s = 0; s < 3; s++) {
+          cx += (rand() - 0.5) * 16;
+          cy += (rand() - 0.5) * 16;
+          ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = clamp(p.digProgress * p.digProgress, 0, 1);
+      ctx.drawImage(this.textures.get(TileId.Empty)![0]!, sx, sy, TILE, TILE);
       ctx.globalAlpha = 1;
+
+      // Molten flare where the drill bites.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.5 + Math.random() * 0.4;
+      ctx.drawImage(this.warmGlow, sx + TILE / 2 - 14, sy + TILE / 2 - 14, 28, 28);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
     }
   }
 
@@ -323,46 +386,153 @@ export class Renderer {
     for (const s of STATIONS) {
       const sx = s.x0 * TILE - cam.x;
       const w = (s.x1 - s.x0 + 1) * TILE;
-      const h = TILE * 2.4;
+      const h = TILE * 3;
       const sy = groundY - h - cam.y;
-      if (sx + w < -20 || sx > cam.viewWidth + 20) continue;
+      if (sx + w < -80 || sx > cam.viewWidth + 80) continue;
 
-      // Body with vertical shading.
+      // Foundation slab.
+      ctx.fillStyle = "#2b2723";
+      ctx.beginPath();
+      ctx.roundRect(sx - 6, groundY - cam.y - 4, w + 12, 5, 2);
+      ctx.fill();
+
+      // Body with vertical shading and an outline for pop.
       const body = ctx.createLinearGradient(0, sy, 0, sy + h);
-      body.addColorStop(0, shade(s.color, 1.15));
-      body.addColorStop(1, shade(s.color, 0.7));
+      body.addColorStop(0, shade(s.color, 1.2));
+      body.addColorStop(0.7, s.color);
+      body.addColorStop(1, shade(s.color, 0.62));
       ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.roundRect(sx, sy + 8, w, h - 8, [5, 5, 0, 0]);
+      ctx.roundRect(sx, sy + 10, w, h - 10, [6, 6, 0, 0]);
       ctx.fill();
-
-      // Roof.
-      ctx.fillStyle = shade(s.color, 0.5);
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Panel seams.
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(sx - 5, sy + 10);
-      ctx.lineTo(sx + 6, sy);
-      ctx.lineTo(sx + w - 6, sy);
-      ctx.lineTo(sx + w + 5, sy + 10);
+      ctx.moveTo(sx + w / 3, sy + 12);
+      ctx.lineTo(sx + w / 3, sy + h - 2);
+      ctx.moveTo(sx + (2 * w) / 3, sy + 12);
+      ctx.lineTo(sx + (2 * w) / 3, sy + h - 2);
+      ctx.stroke();
+
+      // Roof with overhang, plus an antenna with a blinking beacon.
+      ctx.fillStyle = shade(s.color, 0.45);
+      ctx.beginPath();
+      ctx.moveTo(sx - 6, sy + 12);
+      ctx.lineTo(sx + 7, sy);
+      ctx.lineTo(sx + w - 7, sy);
+      ctx.lineTo(sx + w + 6, sy + 12);
       ctx.closePath();
       ctx.fill();
-
-      // Door and lit window.
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(sx + w / 2 - 8, sy + h - 22, 16, 22);
-      ctx.fillStyle = "#ffe9a0";
-      ctx.fillRect(sx + 10, sy + 20, 12, 10);
-      ctx.fillStyle = "rgba(255,233,160,0.25)";
-      ctx.fillRect(sx + 8, sy + 18, 16, 14);
-
-      // Sign.
-      ctx.fillStyle = "rgba(10,8,6,0.75)";
+      ctx.strokeStyle = "#55524e";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.roundRect(sx + 4, sy + h - 44, w - 8, 15, 3);
+      ctx.moveTo(sx + w - 14, sy);
+      ctx.lineTo(sx + w - 14, sy - 12);
+      ctx.stroke();
+      const blink = (Math.sin(this.time * 2.4 + s.x0) + 1) / 2;
+      ctx.fillStyle = `rgba(255,80,60,${0.35 + blink * 0.65})`;
+      ctx.beginPath();
+      ctx.arc(sx + w - 14, sy - 13, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = blink * 0.5;
+      ctx.drawImage(this.warmGlow, sx + w - 14 - 10, sy - 13 - 10, 20, 20);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+
+      // Door with a lit transom, and a glowing window.
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.beginPath();
+      ctx.roundRect(sx + w / 2 - 9, sy + h - 26, 18, 26, [3, 3, 0, 0]);
+      ctx.fill();
+      ctx.fillStyle = "#ffe9a0";
+      ctx.fillRect(sx + w / 2 - 7, sy + h - 24, 14, 3);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.5 + 0.08 * Math.sin(this.time * 1.7 + sx);
+      ctx.drawImage(this.warmGlow, sx + 16 - 20, sy + 27 - 20, 40, 40);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#ffe9a0";
+      ctx.beginPath();
+      ctx.roundRect(sx + 10, sy + 22, 12, 10, 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx + 10, sy + 22, 12, 10);
+
+      // Illuminated sign board.
+      ctx.fillStyle = "rgba(8,7,6,0.85)";
+      ctx.beginPath();
+      ctx.roundRect(sx + 3, sy + h - 48, w - 6, 16, 4);
       ctx.fill();
       ctx.font = "bold 9px monospace";
-      ctx.fillStyle = shade(s.color, 1.8);
+      const glowColor = shade(s.color, 1.9);
+      ctx.save();
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 7;
+      ctx.fillStyle = glowColor;
       const tw = ctx.measureText(s.label).width;
-      ctx.fillText(s.label, sx + (w - tw) / 2, sy + h - 40);
+      ctx.fillText(s.label, sx + (w - tw) / 2, sy + h - 44);
+      ctx.restore();
+
+      // Per-shop props.
+      if (s.id === "fuel") {
+        // Pump bollard with a hose looping to the wall.
+        ctx.fillStyle = "#8a2f22";
+        ctx.beginPath();
+        ctx.roundRect(sx - 16, groundY - cam.y - 18, 9, 15, 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffe9a0";
+        ctx.fillRect(sx - 14, groundY - cam.y - 15, 5, 4);
+        ctx.strokeStyle = "#23211e";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx - 9, groundY - cam.y - 12);
+        ctx.quadraticCurveTo(sx - 2, groundY - cam.y - 26, sx + 3, sy + h - 14);
+        ctx.stroke();
+      } else if (s.id === "trader") {
+        // Ore bin with a visible haul.
+        ctx.fillStyle = "#3d3a36";
+        ctx.beginPath();
+        ctx.moveTo(sx + w + 4, groundY - cam.y - 4);
+        ctx.lineTo(sx + w + 7, groundY - cam.y - 18);
+        ctx.lineTo(sx + w + 25, groundY - cam.y - 18);
+        ctx.lineTo(sx + w + 28, groundY - cam.y - 4);
+        ctx.closePath();
+        ctx.fill();
+        for (const [ox, oc] of [
+          [10, "#f0c020"],
+          [16, "#c9ccd4"],
+          [21, "#b3703a"],
+        ] as const) {
+          ctx.fillStyle = oc;
+          ctx.beginPath();
+          ctx.arc(sx + w + ox, groundY - cam.y - 17, 2.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        // Upgrade shop: gear emblem on the wall.
+        const gx = sx + w - 15;
+        const gy = sy + 26;
+        ctx.fillStyle = shade(s.color, 0.45);
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + this.time * 0.4;
+          ctx.beginPath();
+          ctx.arc(gx + Math.cos(a) * 7, gy + Math.sin(a) * 7, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(gx, gy, 6.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = shade(s.color, 1.5);
+        ctx.beginPath();
+        ctx.arc(gx, gy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.font = "14px monospace";
   }
@@ -372,9 +542,14 @@ export class Renderer {
     const w = p.width;
     const h = p.height;
 
-    // Thruster flame: layered, flickering.
+    // Thruster flame: layered, flickering, glowing.
     if (game.isThrusting && game.state === "playing") {
       const len = 11 + Math.random() * 6;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(this.warmGlow, sx + w / 2 - 24, sy + h + 2 - 24);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = "rgba(255,157,46,0.85)";
       ctx.beginPath();
       ctx.moveTo(sx + w * 0.28, sy + h - 2);
@@ -472,6 +647,22 @@ export class Renderer {
     ctx.beginPath();
     ctx.roundRect(sx + 1, sy, w - 2, h - 6, [8, 8, 3, 3]);
     ctx.fill();
+    if (hullTier !== 3) {
+      // Dark outline for game-art readability (nanoweave gets a glow instead).
+      ctx.strokeStyle = "rgba(15,5,2,0.45)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+    // Panel seam + bolts.
+    ctx.strokeStyle = "rgba(0,0,0,0.22)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx + w * 0.5 - p.facing * 6, sy + 3);
+    ctx.lineTo(sx + w * 0.5 - p.facing * 6, sy + h - 8);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fillRect(sx + 4, sy + h * 0.32, 1.6, 1.6);
+    ctx.fillRect(sx + w - 6, sy + h * 0.32, 1.6, 1.6);
 
     if (hullTier === 3) {
       // Nanoweave: glowing edge and seam.
@@ -523,6 +714,21 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(cx - 1.5, cy - 1.5, 1.6, 0, Math.PI * 2);
     ctx.fill();
+
+    // Headlamp on the leading edge, glowing once it's dark enough to matter.
+    const lampX = sx + (p.facing === 1 ? w - 2 : 2);
+    const lampY = sy + h * 0.3;
+    ctx.fillStyle = "#e8e4d8";
+    ctx.beginPath();
+    ctx.roundRect(lampX - 2, lampY - 2, 4, 4, 1.5);
+    ctx.fill();
+    if (this.darkness > 0.12) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.55 * this.darkness;
+      ctx.drawImage(this.warmGlow, lampX - 16, lampY - 16, 32, 32);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+    }
   }
 
   /**
@@ -600,44 +806,69 @@ export class Renderer {
 
   // --- Post ----------------------------------------------------------------
 
-  private applyLighting(ctx: CanvasRenderingContext2D, game: Game, podX: number, podY: number): void {
+  private applyLighting(
+    ctx: CanvasRenderingContext2D,
+    game: Game,
+    podX: number,
+    podY: number,
+    screenW: number,
+    screenH: number,
+  ): void {
     const cam = game.camera;
     const centerDepth = (cam.y + cam.viewHeight / 2) / TILE - game.world.surfaceRow;
-    const darkness = clamp((centerDepth - DARK_START) / DARK_RAMP, 0, 0.93);
-    if (darkness <= 0.01) return;
+    this.darkness = clamp((centerDepth - DARK_START) / DARK_RAMP, 0, 0.93);
+    if (this.darkness <= 0.01) return;
 
+    const radius = LIGHT_RADIUS * ZOOM;
     const lc = this.lightCanvas;
-    if (lc.width !== cam.viewWidth || lc.height !== cam.viewHeight) {
-      lc.width = cam.viewWidth;
-      lc.height = cam.viewHeight;
+    if (lc.width !== screenW || lc.height !== screenH) {
+      lc.width = screenW;
+      lc.height = screenH;
     }
     const lctx = lc.getContext("2d")!;
     lctx.globalCompositeOperation = "source-over";
-    lctx.clearRect(0, 0, lc.width, lc.height);
-    lctx.fillStyle = `rgba(8,3,0,${darkness})`;
-    lctx.fillRect(0, 0, lc.width, lc.height);
+    lctx.clearRect(0, 0, screenW, screenH);
+    lctx.fillStyle = `rgba(8,3,0,${this.darkness})`;
+    lctx.fillRect(0, 0, screenW, screenH);
 
     // Punch the headlight halo out of the darkness.
-    const grad = lctx.createRadialGradient(podX, podY, 24, podX, podY, LIGHT_RADIUS);
+    const grad = lctx.createRadialGradient(podX, podY, 24, podX, podY, radius);
     grad.addColorStop(0, "rgba(0,0,0,1)");
     grad.addColorStop(0.6, "rgba(0,0,0,0.75)");
     grad.addColorStop(1, "rgba(0,0,0,0)");
     lctx.globalCompositeOperation = "destination-out";
     lctx.fillStyle = grad;
-    lctx.fillRect(podX - LIGHT_RADIUS, podY - LIGHT_RADIUS, LIGHT_RADIUS * 2, LIGHT_RADIUS * 2);
+    lctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
 
     ctx.drawImage(lc, 0, 0);
 
     // Warm tint inside the halo so the light feels like a lamp, not a hole.
-    const warm = ctx.createRadialGradient(podX, podY, 8, podX, podY, LIGHT_RADIUS * 0.55);
-    warm.addColorStop(0, `rgba(255,190,110,${0.1 * darkness})`);
+    const warm = ctx.createRadialGradient(podX, podY, 8, podX, podY, radius * 0.55);
+    warm.addColorStop(0, `rgba(255,190,110,${0.1 * this.darkness})`);
     warm.addColorStop(1, "rgba(255,190,110,0)");
     ctx.fillStyle = warm;
-    ctx.fillRect(podX - LIGHT_RADIUS, podY - LIGHT_RADIUS, LIGHT_RADIUS * 2, LIGHT_RADIUS * 2);
+    ctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
   }
 
-  private drawVignette(ctx: CanvasRenderingContext2D, game: Game): void {
-    const { viewWidth: vw, viewHeight: vh } = game.camera;
+  /** Slow dust motes drifting through the headlight beam. */
+  private drawMotes(ctx: CanvasRenderingContext2D, podX: number, podY: number): void {
+    if (this.darkness < 0.15) return;
+    const r = LIGHT_RADIUS * 0.8;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "#ffd9a0";
+    for (const m of this.motes) {
+      const x = podX + m.ox * r + Math.sin(this.time * 0.25 + m.phase) * 14;
+      const y = podY + m.oy * r + Math.cos(this.time * 0.2 + m.phase * 1.3) * 11;
+      const d = Math.hypot(x - podX, y - podY) / r;
+      if (d >= 1) continue;
+      ctx.globalAlpha = (1 - d) * 0.3 * this.darkness;
+      ctx.fillRect(x, y, 1.6, 1.6);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  private drawVignette(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
     const grad = ctx.createRadialGradient(
       vw / 2,
       vh / 2,
@@ -652,10 +883,27 @@ export class Renderer {
     ctx.fillRect(0, 0, vw, vh);
   }
 
+  /** Red edge flash on damage. */
+  private drawFlash(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
+    const grad = ctx.createRadialGradient(
+      vw / 2,
+      vh / 2,
+      Math.min(vw, vh) * 0.3,
+      vw / 2,
+      vh / 2,
+      Math.max(vw, vh) * 0.72,
+    );
+    grad.addColorStop(0, "rgba(200,30,10,0)");
+    grad.addColorStop(1, `rgba(200,30,10,${(this.flash * 0.42).toFixed(3)})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, vw, vh);
+  }
+
   // --- Screens -------------------------------------------------------------
 
   private drawTitleScreen(ctx: CanvasRenderingContext2D, game: Game): void {
-    const { viewWidth, viewHeight } = game.camera;
+    const viewWidth = ctx.canvas.clientWidth;
+    const viewHeight = ctx.canvas.clientHeight;
     ctx.fillStyle = "rgba(10, 6, 3, 0.6)";
     ctx.fillRect(0, 0, viewWidth, viewHeight);
 
@@ -685,7 +933,8 @@ export class Renderer {
   }
 
   private drawDeathScreen(ctx: CanvasRenderingContext2D, game: Game): void {
-    const { viewWidth, viewHeight } = game.camera;
+    const viewWidth = ctx.canvas.clientWidth;
+    const viewHeight = ctx.canvas.clientHeight;
     ctx.fillStyle = "rgba(10,2,0,0.72)";
     ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.textBaseline = "top";
@@ -704,4 +953,51 @@ export class Renderer {
 
 function center(ctx: CanvasRenderingContext2D, text: string, viewWidth: number, y: number): void {
   ctx.fillText(text, (viewWidth - ctx.measureText(text).width) / 2, y);
+}
+
+/** Baked soft shadow along one edge of a tunnel tile. (dx,dy) points at the wall. */
+function bakeEdge(dx: number, dy: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE;
+  canvas.height = TILE;
+  const ctx = canvas.getContext("2d")!;
+  const depth = 11;
+  const grad =
+    dy !== 0
+      ? ctx.createLinearGradient(0, dy < 0 ? 0 : TILE, 0, dy < 0 ? depth : TILE - depth)
+      : ctx.createLinearGradient(dx < 0 ? 0 : TILE, 0, dx < 0 ? depth : TILE - depth, 0);
+  grad.addColorStop(0, "rgba(0,0,0,0.4)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, TILE, TILE);
+  return canvas;
+}
+
+/** Sunlit crust highlight for solid tiles exposed from above. */
+function bakeCrust(): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = TILE;
+  canvas.height = TILE;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createLinearGradient(0, 0, 0, 7);
+  grad.addColorStop(0, "rgba(255,225,185,0.28)");
+  grad.addColorStop(1, "rgba(255,225,185,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, TILE, 7);
+  return canvas;
+}
+
+/** Radial glow sprite for emissive effects. */
+function bakeGlow(size: number, r: number, g: number, b: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.8)`);
+  grad.addColorStop(0.4, `rgba(${r},${g},${b},0.28)`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return canvas;
 }

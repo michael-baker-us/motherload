@@ -55,7 +55,7 @@ export class Game {
   readonly upgrades: UpgradeState = createUpgradeState();
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
-  toast: { text: string; timeLeft: number } | null = null;
+  toast: { text: string; timeLeft: number; total: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
   readonly fxEvents: FxEvent[] = [];
   /** Testing cheats: unlimited fuel & funds. Saving is disabled while on. */
@@ -330,7 +330,7 @@ export class Game {
   }
 
   private showToast(text: string, seconds: number): void {
-    this.toast = { text, timeLeft: seconds };
+    this.toast = { text, timeLeft: seconds, total: seconds };
   }
 
   private pushFx(event: FxEvent): void {
