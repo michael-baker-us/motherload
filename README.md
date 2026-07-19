@@ -18,7 +18,10 @@ npm run build      # type-check + production build
 npm run preview    # serve the production build
 ```
 
-**Controls:** ← → fly and dig sideways · ↑ thrust · ↓ drill down
+**Controls:** ← → fly and dig sideways · ↑ thrust · ↓ drill down · E enter station
+
+Progress autosaves whenever you're at the surface (station visits, respawns,
+or just parking topside). The title screen offers Continue / New game.
 
 Pushes to `main` deploy to GitHub Pages via `.github/workflows/ci.yml`
 (enable Pages with source "GitHub Actions" in the repo settings).
@@ -48,5 +51,5 @@ Two rules keep it maintainable:
 - [x] M2 — movement, digging, worldgen, camera
 - [x] M3 — fuel, cargo, surface stations (sell + refuel), money, death/respawn
 - [x] M4 — upgrade shop (drill/tank/cargo/hull + repair), gas pockets, lava, fall damage
-- [ ] M5 — save/load, title screen, tuning pass
+- [x] M5 — save/load (localStorage autosave at the surface), title screen
 - [ ] Later — Tauri wrapper for a native Linux build (Steam Deck)

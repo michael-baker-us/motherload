@@ -6,10 +6,25 @@ import { TileId } from "./tiles";
 
 const DT = 1 / 60;
 
+import type { SaveStorage } from "./save";
+
 // A Game instance is DOM-free until a shop overlay opens, so the core
 // state machine is testable in node.
-const makeGame = () => new Game(800, 600);
+function makeGame(storage: SaveStorage | null = null): Game {
+  const game = new Game(800, 600, storage);
+  game.state = "playing"; // skip the title screen
+  return game;
+}
 const idleInput = new Input(); // never attached — all keys up
+
+function fakeStorage(): SaveStorage {
+  const data = new Map<string, string>();
+  return {
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+  };
+}
 
 describe("game state machine", () => {
   it("drains fuel over time while idle", () => {
@@ -109,6 +124,39 @@ describe("game state machine", () => {
     expect(game.repairHull()).toBe(true);
     expect(game.player.hull).toBe(game.player.maxHull);
     expect(game.money).toBe(100 - 20); // 10 HP at $2/HP
+  });
+
+  it("starts at the title screen and does not simulate there", () => {
+    const game = new Game(800, 600);
+    expect(game.state).toBe("title");
+    const fuel = game.player.fuel;
+    for (let i = 0; i < 60; i++) game.update(DT, idleInput);
+    expect(game.player.fuel).toBe(fuel);
+  });
+
+  it("continues a saved game in a second session: world, money, upgrades intact", () => {
+    const storage = fakeStorage();
+    const first = makeGame(storage);
+    first.money = 5000;
+    first.buyUpgrade("tank");
+    first.world.dig(30, 6);
+    first.saveNow();
+
+    const second = new Game(800, 600, storage);
+    expect(second.hasSave).toBe(true);
+    expect(second.continueGame()).toBe(true);
+    expect(second.state).toBe("playing");
+    expect(second.money).toBe(first.money);
+    expect(second.player.maxFuel).toBe(160);
+    expect(second.world.getTile(30, 6)).toBe(TileId.Empty);
+    expect(second.world.tiles).toEqual(first.world.tiles);
+  });
+
+  it("continueGame without a save reports failure", () => {
+    const game = new Game(800, 600);
+    expect(game.hasSave).toBe(false);
+    expect(game.continueGame()).toBe(false);
+    expect(game.state).toBe("title");
   });
 
   it("reports the station under a parked pod", () => {

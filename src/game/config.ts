@@ -9,7 +9,6 @@ export const WORLD = {
   width: 60, // tiles
   height: 2000, // tiles
   surfaceRow: 6, // first solid row; everything above is sky
-  seed: 1337,
 };
 
 export const PHYSICS = {

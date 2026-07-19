@@ -45,5 +45,11 @@ await page.goto("http://localhost:5199", { waitUntil: "networkidle" });
 
 ## Gotchas
 
+- The game boots to a **title screen** — press Enter (`page.keyboard.press("Enter")`)
+  before driving; `window.__game.state` must read `"playing"`.
+- Saves live in `localStorage["motherload-save"]`; clear it (or use a fresh
+  browser context) for a deterministic fresh start. Each new game has a
+  **random world seed** — read `__game.world.seed` instead of assuming one.
+
 - A favicon 404 shows up in console errors; benign, ignore it.
 - Screenshots land wherever the driver script's directory is — use the scratchpad.

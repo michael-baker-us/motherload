@@ -10,6 +10,15 @@ import { digHazard, fallDamage } from "./hazards";
 import { createPlayer, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import { hash2d } from "./rng";
+import {
+  applyPlayerSave,
+  applyWorldSave,
+  captureSave,
+  loadSave,
+  writeSave,
+  type SaveData,
+  type SaveStorage,
+} from "./save";
 import { STATIONS, stationInSpan, type Station } from "./stations";
 import { TILE_DEFS, TileId } from "./tiles";
 import {
@@ -21,28 +30,70 @@ import {
 } from "./upgrades";
 import { World } from "./world";
 
-export type GameState = "playing" | "shop" | "dead";
+export type GameState = "title" | "playing" | "shop" | "dead";
+
+/** Interval between surface autosaves while the pod is parked topside. */
+const AUTOSAVE_INTERVAL = 5;
 
 export class Game {
-  readonly world: World;
+  world: World;
   readonly camera: Camera;
   player: Player;
   money = ECONOMY.startingMoney;
-  state: GameState = "playing";
+  state: GameState = "title";
   /** Owned upgrade tiers — survive pod loss, unlike the pod itself. */
   readonly upgrades: UpgradeState = createUpgradeState();
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
 
   private readonly shop = new ShopOverlay();
+  private readonly storage: SaveStorage | null;
+  private pendingSave: SaveData | null;
   private thrusting = false;
   private toast: { text: string; timeLeft: number } | null = null;
   private justClosedShop = false;
+  private autosaveTimer = 0;
 
-  constructor(viewWidth: number, viewHeight: number) {
-    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, WORLD.seed, TILE);
+  constructor(viewWidth: number, viewHeight: number, storage: SaveStorage | null = null) {
+    this.storage = storage;
+    this.pendingSave = storage ? loadSave(storage) : null;
+    // Each new game gets its own world; a save carries its seed with it.
+    const seed = Math.floor(Math.random() * 0x7fffffff);
+    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, seed, TILE);
     this.player = createPlayer(this.world);
     this.camera = new Camera(viewWidth, viewHeight);
+  }
+
+  get hasSave(): boolean {
+    return this.pendingSave !== null;
+  }
+
+  startNewGame(): void {
+    this.state = "playing";
+    this.saveNow();
+  }
+
+  /** Rebuild world and pod from the pending save. Returns false if there is none. */
+  continueGame(): boolean {
+    const data = this.pendingSave;
+    if (!data) return false;
+    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, data.seed, TILE);
+    applyWorldSave(this.world, data);
+    Object.assign(this.upgrades, data.upgrades);
+    this.money = data.money;
+    const pod = createPlayer(this.world);
+    this.applyUpgrades(pod);
+    applyPlayerSave(pod, data);
+    this.player = pod;
+    this.state = "playing";
+    return true;
+  }
+
+  saveNow(): void {
+    if (!this.storage) return;
+    const data = captureSave(this.world, this.player, this.money, this.upgrades);
+    writeSave(this.storage, data);
+    this.pendingSave = data;
   }
 
   resize(viewWidth: number, viewHeight: number): void {
@@ -58,6 +109,14 @@ export class Game {
   update(dt: number, input: Input): void {
     if (this.toast && (this.toast.timeLeft -= dt) <= 0) this.toast = null;
 
+    if (this.state === "title") {
+      if (input.wasPressed("Enter", "Space")) {
+        if (!this.continueGame()) this.startNewGame();
+      } else if (input.wasPressed("KeyN")) {
+        this.startNewGame();
+      }
+      return;
+    }
     if (this.state === "shop") return; // sim paused; the overlay owns input
     if (this.state === "dead") {
       if (input.wasPressed("Enter", "Space")) this.respawn();
@@ -127,7 +186,16 @@ export class Game {
       this.shop.open(station, this, () => {
         this.state = "playing";
         this.justClosedShop = true;
+        this.saveNow(); // station visits are natural checkpoints
       });
+      return;
+    }
+
+    // Autosave while parked at the surface.
+    this.autosaveTimer += dt;
+    if (p.grounded && this.depth === 0 && this.autosaveTimer >= AUTOSAVE_INTERVAL) {
+      this.autosaveTimer = 0;
+      this.saveNow();
     }
   }
 
@@ -198,6 +266,7 @@ export class Game {
     fresh.hull = fresh.maxHull;
     this.player = fresh;
     this.state = "playing";
+    this.saveNow(); // the fee and lost cargo are part of history now
   }
 
   private showToast(text: string, seconds: number): void {
@@ -220,6 +289,10 @@ export class Game {
     this.drawTiles(ctx);
     this.drawStations(ctx);
     this.drawPlayer(ctx, px - this.camera.x, py - this.camera.y);
+    if (this.state === "title") {
+      this.drawTitleScreen(ctx);
+      return;
+    }
     drawHud(ctx, {
       depth: this.depth,
       fuel: p.fuel,
@@ -362,6 +435,38 @@ export class Game {
     }
     ctx.closePath();
     ctx.fill();
+  }
+
+  private drawTitleScreen(ctx: CanvasRenderingContext2D): void {
+    const { viewWidth, viewHeight } = this.camera;
+    ctx.fillStyle = "rgba(10, 8, 4, 0.65)";
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
+
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#f0c020";
+    ctx.font = "bold 52px monospace";
+    center(ctx, "MOTHERLOAD", viewWidth, viewHeight * 0.28);
+    ctx.fillStyle = "#c9ccd4";
+    ctx.font = "15px monospace";
+    center(ctx, "dig deep · sell minerals · upgrade · don't run dry", viewWidth, viewHeight * 0.28 + 68);
+
+    ctx.fillStyle = "#ffe97a";
+    ctx.font = "17px monospace";
+    center(
+      ctx,
+      this.hasSave ? "[Enter] continue" : "[Enter] start digging",
+      viewWidth,
+      viewHeight * 0.55,
+    );
+    if (this.hasSave) {
+      ctx.fillStyle = "#c9ccd4";
+      ctx.font = "14px monospace";
+      center(ctx, "[N] new game (overwrites the save)", viewWidth, viewHeight * 0.55 + 30);
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.font = "13px monospace";
+    center(ctx, "← → fly/dig · ↑ thrust · ↓ drill · E station", viewWidth, viewHeight * 0.55 + 64);
+    ctx.font = "14px monospace";
   }
 
   private drawDeathScreen(ctx: CanvasRenderingContext2D): void {

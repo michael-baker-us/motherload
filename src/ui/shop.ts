@@ -171,7 +171,7 @@ export class ShopOverlay {
     btn.textContent = label;
     btn.disabled = !enabled;
     btn.style.cssText =
-      "margin-top:10px;padding:8px 14px;font-family:monospace;font-size:14px;" +
+      "display:block;margin-top:10px;padding:8px 14px;font-family:monospace;font-size:14px;" +
       "cursor:pointer;background:#2e7d32;color:#fff;border:none;border-radius:4px;" +
       (enabled ? "" : "opacity:0.4;cursor:default;");
     btn.addEventListener("click", onClick);

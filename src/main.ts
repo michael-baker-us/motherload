@@ -10,7 +10,7 @@ if (!ctx) throw new Error("2d context unavailable");
 const input = new Input();
 input.attach(window);
 
-const game = new Game(window.innerWidth, window.innerHeight);
+const game = new Game(window.innerWidth, window.innerHeight, window.localStorage);
 
 // Dev-only handle for debugging and driving the game from the console/tests.
 if (import.meta.env.DEV) {

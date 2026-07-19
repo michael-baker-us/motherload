@@ -11,6 +11,8 @@ export class World {
   readonly tiles: Uint8Array;
   readonly pixelWidth: number;
   readonly pixelHeight: number;
+  /** Every tile changed since generation (flat index → tile) — the save system's diff. */
+  readonly changes = new Map<number, TileId>();
 
   constructor(
     readonly width: number,
@@ -60,7 +62,9 @@ export class World {
 
   setTile(x: number, y: number, tile: TileId): void {
     if (!this.inBounds(x, y)) return;
-    this.tiles[y * this.width + x] = tile;
+    const index = y * this.width + x;
+    this.tiles[index] = tile;
+    this.changes.set(index, tile);
   }
 
   isSolid(x: number, y: number): boolean {
