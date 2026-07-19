@@ -6,6 +6,7 @@ import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
 import { TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
+import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
 
@@ -31,6 +32,11 @@ const DARK_START = 4;
 const DARK_RAMP = 70;
 const LIGHT_RADIUS = 165; // world px; multiplied by ZOOM on screen
 
+// 2.5D view: how far the cavity back plane recedes toward the view centre.
+const BACK_SCALE = 0.85;
+// Flat-shaded lighting per face orientation (multiplies the tile's base color).
+const FACE_LIGHT = { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 };
+
 /**
  * All drawing lives here; Game stays logic-only (and node-testable). The
  * renderer owns purely cosmetic state: textures, particles, camera smoothing,
@@ -38,6 +44,8 @@ const LIGHT_RADIUS = 165; // world px; multiplied by ZOOM on screen
  */
 export class Renderer {
   private readonly textures: TileTextures;
+  /** Flat-shaded face colors, keyed by tile id + light factor. */
+  private readonly faceColors = new Map<number, string>();
   private readonly sky = new Sky();
   private readonly hud = new Hud();
   private readonly lightCanvas = document.createElement("canvas");
@@ -290,10 +298,13 @@ export class Renderer {
     const x1 = Math.min(world.width - 1, Math.floor((cam.x + cam.viewWidth) / TILE));
     const y1 = Math.min(world.height - 1, Math.floor((cam.y + cam.viewHeight) / TILE));
 
+    if (viewPrefs.depth) this.drawDepthPass(ctx, game);
+
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const tile = world.getTile(tx, ty);
         if (tile === TileId.Sky) continue;
+        if (tile === TileId.Empty && viewPrefs.depth) continue; // cavity drawn by the depth pass
         const sx = tx * TILE - cam.x;
         const sy = ty * TILE - cam.y;
 
@@ -377,6 +388,91 @@ export class Renderer {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
     }
+  }
+
+  /**
+   * Pseudo-3D pass: cavity back walls and extruded wall faces, all projected
+   * toward the view centre so the scene shares one vanishing point. Runs
+   * before the front-face pass, whose opaque tile blits clip any perspective
+   * spill from off-centre faces — no visibility tests needed.
+   */
+  private drawDepthPass(ctx: CanvasRenderingContext2D, game: Game): void {
+    const cam = game.camera;
+    const world = game.world;
+    // Off-screen tiles can spill faces into view near the screen edges.
+    const pad = 3;
+    const x0 = Math.max(0, Math.floor(cam.x / TILE) - pad);
+    const y0 = Math.max(0, Math.floor(cam.y / TILE) - pad);
+    const x1 = Math.min(world.width - 1, Math.floor((cam.x + cam.viewWidth) / TILE) + pad);
+    const y1 = Math.min(world.height - 1, Math.floor((cam.y + cam.viewHeight) / TILE) + pad);
+    const vx = cam.viewWidth / 2;
+    const vy = cam.viewHeight / 2;
+    const px = (x: number): number => vx + (x - vx) * BACK_SCALE;
+    const py = (y: number): number => vy + (y - vy) * BACK_SCALE;
+
+    // Back walls first: they sit deepest. Projected rects of adjacent tiles
+    // stay adjacent (the projection is a similarity), so textures still tile.
+    const backVariants = this.textures.get(TileId.Empty)!;
+    const backSize = TILE * BACK_SCALE + 0.5;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (world.getTile(tx, ty) !== TileId.Empty) continue;
+        const v = Math.floor(hash2d(tx, ty, 7) * TILE_VARIANTS) % TILE_VARIANTS;
+        ctx.drawImage(backVariants[v]!, px(tx * TILE - cam.x), py(ty * TILE - cam.y), backSize, backSize);
+      }
+    }
+
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        const tile = world.getTile(tx, ty);
+        const sx = tx * TILE - cam.x;
+        const sy = ty * TILE - cam.y;
+        if (tile === TileId.Empty) {
+          const up = world.getTile(tx, ty - 1);
+          const down = world.getTile(tx, ty + 1);
+          const left = world.getTile(tx - 1, ty);
+          const right = world.getTile(tx + 1, ty);
+          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, FACE_LIGHT.ceiling, px, py);
+          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, FACE_LIGHT.floor, px, py);
+          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, FACE_LIGHT.wall, px, py);
+          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, FACE_LIGHT.wall, px, py);
+        } else if (TILE_DEFS[tile].solid && world.getTile(tx, ty - 1) === TileId.Sky) {
+          // Sunlit lip along the surface — the terrain's visible top face.
+          this.face(ctx, sx, sy, sx + TILE, sy, tile, FACE_LIGHT.lip, px, py);
+        }
+      }
+    }
+  }
+
+  /** One extruded face: front edge (ax,ay)→(bx,by) swept to the back plane. */
+  private face(
+    ctx: CanvasRenderingContext2D,
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    tile: TileId,
+    light: number,
+    px: (x: number) => number,
+    py: (y: number) => number,
+  ): void {
+    const key = tile * 10 + light;
+    let color = this.faceColors.get(key);
+    if (!color) {
+      color = shade(TILE_DEFS[tile].color, light);
+      this.faceColors.set(key, color);
+    }
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color; // stroking the same path fills antialiasing seams
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.lineTo(px(bx), py(by));
+    ctx.lineTo(px(ax), py(ay));
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   private drawStations(ctx: CanvasRenderingContext2D, game: Game): void {
