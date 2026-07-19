@@ -11,6 +11,8 @@ export interface HudData {
   hint: string | null;
   /** Transient message with remaining seconds, e.g. "CARGO FULL". */
   toast: { text: string; timeLeft: number } | null;
+  /** Dev cheats active — progress is not being saved. */
+  dev: boolean;
 }
 
 const PANEL_W = 178;
@@ -66,6 +68,19 @@ export function drawHud(ctx: CanvasRenderingContext2D, data: HudData): void {
   bar(ctx, "HULL", 22, 66, hullFrac, hullFrac > 0.35 ? "#6fb7ff" : "#e04a3a");
   bar(ctx, "BAY", 22, 84, data.cargoUnits / data.cargoCapacity, "#c9a05a");
 
+  // Dev-mode badge under the panel: loud on purpose — saves are off.
+  if (data.dev) {
+    ctx.font = "bold 11px monospace";
+    const text = "DEV MODE · not saving";
+    const w = ctx.measureText(text).width;
+    ctx.fillStyle = "rgba(200,110,30,0.9)";
+    ctx.beginPath();
+    ctx.roundRect(10, 112, w + 20, 20, 10);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(text, 20, 117);
+  }
+
   // Contextual hint pill above the controls line.
   const viewH = ctx.canvas.clientHeight;
   ctx.font = "13px monospace";
@@ -79,7 +94,7 @@ export function drawHud(ctx: CanvasRenderingContext2D, data: HudData): void {
     ctx.fillText(data.hint, 22, viewH - 51);
   }
   ctx.fillStyle = "rgba(255,255,255,0.55)";
-  ctx.fillText("← → fly/dig · ↑ thrust · ↓ drill · E station", 14, viewH - 26);
+  ctx.fillText("← → fly/dig · ↑ thrust · ↓ drill · E station · Esc menu", 14, viewH - 26);
 
   // Toast pill, top-center, fading out.
   if (data.toast) {

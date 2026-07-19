@@ -1,5 +1,6 @@
 import { Camera } from "../engine/camera";
 import type { Input } from "../engine/input";
+import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
 import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
@@ -27,11 +28,11 @@ import {
 } from "./upgrades";
 import { World } from "./world";
 
-export type GameState = "title" | "playing" | "shop" | "dead";
+export type GameState = "title" | "playing" | "shop" | "menu" | "dead";
 
 /** One-shot visual events for the renderer to consume (world coordinates). */
 export interface FxEvent {
-  kind: "dug" | "impact" | "explosion";
+  kind: "dug" | "impact" | "explosion" | "upgrade";
   x: number;
   y: number;
   color?: string;
@@ -40,6 +41,9 @@ export interface FxEvent {
 
 /** Interval between surface autosaves while the pod is parked topside. */
 const AUTOSAVE_INTERVAL = 5;
+
+/** Money floor while dev mode is on. */
+const DEV_MONEY = 999999;
 
 export class Game {
   world: World;
@@ -54,8 +58,11 @@ export class Game {
   toast: { text: string; timeLeft: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
   readonly fxEvents: FxEvent[] = [];
+  /** Testing cheats: unlimited fuel & funds. Saving is disabled while on. */
+  devMode = false;
 
   private readonly shop = new ShopOverlay();
+  private readonly menu = new MenuOverlay();
   private readonly storage: SaveStorage | null;
   private pendingSave: SaveData | null;
   private thrusting = false;
@@ -115,8 +122,14 @@ export class Game {
     return true;
   }
 
+  toggleDevMode(): boolean {
+    this.devMode = !this.devMode;
+    return this.devMode;
+  }
+
   saveNow(): void {
-    if (!this.storage) return;
+    // Dev-mode sessions must never touch the real save.
+    if (!this.storage || this.devMode) return;
     const data = captureSave(this.world, this.player, this.money, this.upgrades);
     writeSave(this.storage, data);
     this.pendingSave = data;
@@ -133,7 +146,7 @@ export class Game {
       }
       return;
     }
-    if (this.state === "shop") return; // sim paused; the overlay owns input
+    if (this.state === "shop" || this.state === "menu") return; // sim paused; the overlay owns input
     if (this.state === "dead") {
       if (input.wasPressed("Enter", "Space")) this.respawn();
       return;
@@ -145,7 +158,20 @@ export class Game {
       return;
     }
 
+    if (input.wasPressed("Escape")) {
+      this.state = "menu";
+      this.menu.open(this, () => {
+        this.state = "playing";
+        this.justClosedShop = true;
+      });
+      return;
+    }
+
     const p = this.player;
+    if (this.devMode) {
+      p.fuel = p.maxFuel;
+      if (this.money < DEV_MONEY) this.money = DEV_MONEY;
+    }
     const move: MoveInput = {
       thrustUp: input.isDown("ArrowUp", "KeyW", "Space") && p.fuel > 0,
       moveLeft: input.isDown("ArrowLeft", "KeyA"),
@@ -259,6 +285,12 @@ export class Game {
     this.upgrades[track] += 1;
     this.applyUpgrades(this.player);
     if (track === "hull") this.player.hull = this.player.maxHull; // new hull ships repaired
+    this.showToast(`${next.name} installed!`, 2);
+    this.pushFx({
+      kind: "upgrade",
+      x: this.player.x + this.player.width / 2,
+      y: this.player.y + this.player.height / 2,
+    });
     return true;
   }
 

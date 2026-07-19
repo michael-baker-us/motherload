@@ -98,6 +98,7 @@ describe("game state machine", () => {
     expect(game.buyUpgrade("drill")).toBe(true);
     expect(game.player.maxFuel).toBe(160);
     expect(game.drillPower).toBeCloseTo(1.6);
+    expect(game.fxEvents.some((e) => e.kind === "upgrade")).toBe(true);
 
     game.die("test");
     game.respawn();
@@ -157,6 +158,29 @@ describe("game state machine", () => {
     expect(game.hasSave).toBe(false);
     expect(game.continueGame()).toBe(false);
     expect(game.state).toBe("title");
+  });
+
+  it("dev mode pins fuel and funds, and never writes the save", () => {
+    const storage = fakeStorage();
+    const game = makeGame(storage);
+    game.saveNow();
+    const savedBefore = storage.getItem("motherload-save");
+
+    game.toggleDevMode();
+    game.player.fuel = 10;
+    game.money = 5;
+    for (let i = 0; i < 30; i++) game.update(DT, idleInput);
+    expect(game.player.fuel).toBeGreaterThan(game.player.maxFuel * 0.99);
+    expect(game.money).toBeGreaterThanOrEqual(999999);
+
+    game.saveNow();
+    expect(storage.getItem("motherload-save")).toBe(savedBefore);
+
+    // Toggling off resumes normal fuel drain.
+    game.toggleDevMode();
+    const fuel = game.player.fuel;
+    for (let i = 0; i < 60; i++) game.update(DT, idleInput);
+    expect(game.player.fuel).toBeLessThan(fuel);
   });
 
   it("reports the station under a parked pod", () => {

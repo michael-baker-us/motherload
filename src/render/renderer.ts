@@ -112,6 +112,7 @@ export class Renderer {
       cargoCapacity: p.cargoCapacity,
       hint: game.stationHint(),
       toast: game.toast,
+      dev: game.devMode,
     });
     if (game.state === "dead") this.drawDeathScreen(ctx, game);
   }
@@ -129,6 +130,9 @@ export class Renderer {
         this.burst(e.x, e.y, 26, "#ff9d2e", 220, 200);
         this.burst(e.x, e.y, 12, "#ffe97a", 160, 100);
         this.shake = Math.max(this.shake, 0.6);
+      } else if (e.kind === "upgrade") {
+        this.burst(e.x, e.y, 20, "#ffe97a", 140, -40);
+        this.burst(e.x, e.y, 8, "#ffffff", 90, -40);
       }
     }
     events.length = 0;
@@ -411,7 +415,38 @@ export class Renderer {
     const mx = swing >= 0 ? lerp(w / 2, 3, swing) : lerp(w / 2, w - 3, -swing);
     const my = lerp(h - 6, h * 0.66, Math.abs(swing));
     const spinning = digging || this.drillHold > 0;
-    this.drawDrill(ctx, sx + mx, sy + my, this.drillAngle, spinning);
+    this.drawDrill(ctx, sx + mx, sy + my, this.drillAngle, spinning, game.upgrades.drill);
+
+    // Back-mounted attachments (drawn behind the body): the tank and cargo
+    // upgrades are visible gear that grows with tier.
+    const u = game.upgrades;
+    const backRight = p.facing === -1; // attachments ride on the trailing side
+    if (u.tank > 0) {
+      const tw = 4 + u.tank * 2;
+      const th = 6 + u.tank * 2;
+      const tx = backRight ? sx + w - tw + 2 : sx - 2;
+      ctx.fillStyle = "#c9a227";
+      ctx.beginPath();
+      ctx.roundRect(tx, sy - th + 4, tw, th, 2);
+      ctx.fill();
+      ctx.fillStyle = "#8a6f1a";
+      ctx.fillRect(tx, sy - th + 7, tw, 2);
+      ctx.fillStyle = "#3a3a44";
+      ctx.fillRect(tx + tw / 2 - 1.5, sy - th + 2, 3, 3);
+    }
+    if (u.cargo > 0) {
+      const cw = 3 + u.cargo * 2;
+      const ch = 10 + u.cargo * 2;
+      const cx0 = backRight ? sx + w - 2 : sx + 2 - cw;
+      const cy0 = sy + h - 8 - ch;
+      ctx.fillStyle = "#6b5a3a";
+      ctx.beginPath();
+      ctx.roundRect(cx0, cy0, cw, ch, 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.fillRect(cx0, cy0 + 3, cw, 1.5);
+      ctx.fillRect(cx0, cy0 + ch - 5, cw, 1.5);
+    }
 
     // Tracks: dark base with wheels.
     ctx.fillStyle = "#23232a";
@@ -425,14 +460,49 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Body: two-tone shaded shell.
+    // Body shell: the hull tier reskins the pod.
+    // tin (red) → steel (armor band) → titanium (silver plate) → nanoweave (dark, glowing seams)
+    const hullTier = u.hull;
+    const shellTop = ["#e05838", "#e05838", "#c9ccd4", "#3a4050"][hullTier]!;
+    const shellBottom = ["#93291a", "#93291a", "#7c828e", "#181b24"][hullTier]!;
     const body = ctx.createLinearGradient(0, sy, 0, sy + h - 6);
-    body.addColorStop(0, "#e05838");
-    body.addColorStop(1, "#93291a");
+    body.addColorStop(0, shellTop);
+    body.addColorStop(1, shellBottom);
     ctx.fillStyle = body;
     ctx.beginPath();
     ctx.roundRect(sx + 1, sy, w - 2, h - 6, [8, 8, 3, 3]);
     ctx.fill();
+
+    if (hullTier === 3) {
+      // Nanoweave: glowing edge and seam.
+      ctx.strokeStyle = "#5ff0d8";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(sx + 1.5, sy + 0.5, w - 3, h - 7, [8, 8, 3, 3]);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(95,240,216,0.45)";
+      ctx.beginPath();
+      ctx.moveTo(sx + 4, sy + h * 0.55);
+      ctx.lineTo(sx + w - 4, sy + h * 0.55);
+      ctx.stroke();
+    } else if (hullTier >= 1) {
+      // Steel / titanium: riveted armor band across the lower shell.
+      ctx.fillStyle = hullTier === 2 ? "#5a606c" : "#8a8f98";
+      ctx.beginPath();
+      ctx.roundRect(sx + 2, sy + h * 0.56, w - 4, 5, 2);
+      ctx.fill();
+      ctx.fillStyle = hullTier === 2 ? "#2b2f38" : "#3a3f47";
+      for (const rx of [0.25, 0.5, 0.75]) {
+        ctx.fillRect(sx + w * rx - 1, sy + h * 0.56 + 1.6, 2, 2);
+      }
+      if (hullTier === 2) {
+        // Titanium: red nose accent keeps the pod's identity.
+        ctx.fillStyle = "#c23b22";
+        ctx.beginPath();
+        ctx.roundRect(sx + (p.facing === 1 ? w - 9 : 3), sy + 2, 6, 5, 2);
+        ctx.fill();
+      }
+    }
     ctx.fillStyle = "rgba(255,255,255,0.18)";
     ctx.beginPath();
     ctx.roundRect(sx + 3, sy + 2, w - 6, 4, 3);
@@ -466,7 +536,16 @@ export class Renderer {
     y: number,
     angle: number,
     digging: boolean,
+    tier: number,
   ): void {
+    // Per-tier material: rusty → bronze → carbide → diamond.
+    const style = [
+      { light: "#c89878", mid: "#8a6a50", dark: "#5a4030", extra: 0 },
+      { light: "#f0c080", mid: "#c9762e", dark: "#7c4515", extra: 2 },
+      { light: "#e6eaf0", mid: "#878d99", dark: "#3d414b", extra: 3 },
+      { light: "#ffffff", mid: "#a8f0ea", dark: "#4faca4", extra: 5 },
+    ][tier]!;
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
@@ -478,12 +557,12 @@ export class Renderer {
     ctx.roundRect(-7, 0, 14, 5, 2);
     ctx.fill();
 
-    // Cone.
-    const len = digging ? 15 : 11;
+    // Cone: longer and shinier at higher tiers.
+    const len = (digging ? 15 : 11) + style.extra;
     const cone = ctx.createLinearGradient(-6, 0, 6, 0);
-    cone.addColorStop(0, "#e6eaf0");
-    cone.addColorStop(0.45, "#9aa0ab");
-    cone.addColorStop(1, "#5c616b");
+    cone.addColorStop(0, style.light);
+    cone.addColorStop(0.45, style.mid);
+    cone.addColorStop(1, style.dark);
     ctx.fillStyle = cone;
     ctx.beginPath();
     ctx.moveTo(-6, 4);
@@ -509,9 +588,9 @@ export class Renderer {
     }
     ctx.restore();
 
-    // Glinting tip while digging.
-    if (digging) {
-      ctx.fillStyle = "rgba(255,240,200,0.9)";
+    // Glinting tip while digging; a diamond drill glints all the time.
+    if (digging || tier === 3) {
+      ctx.fillStyle = tier === 3 ? "rgba(220,255,250,0.95)" : "rgba(255,240,200,0.9)";
       ctx.beginPath();
       ctx.arc(0, 4 + len - 1, 1.6, 0, Math.PI * 2);
       ctx.fill();

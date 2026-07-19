@@ -18,7 +18,11 @@ npm run build      # type-check + production build
 npm run preview    # serve the production build
 ```
 
-**Controls:** ← → fly and dig sideways · ↑ thrust · ↓ drill down · E enter station
+**Controls:** ← → fly and dig sideways · ↑ thrust · ↓ drill down · E enter station · Esc settings
+
+The settings menu (Esc) includes a **dev mode** toggle for playtesting:
+unlimited fuel and funds. While it's on, progress is not saved, so a cheat
+session can't touch your real save.
 
 Progress autosaves whenever you're at the surface (station visits, respawns,
 or just parking topside). The title screen offers Continue / New game.
