@@ -31,6 +31,7 @@ Pushes to `main` deploy to GitHub Pages via `.github/workflows/ci.yml`
 ```text
 src/
   engine/       game-agnostic: fixed-timestep loop, input, camera
+  render/       all drawing: pre-rendered tile textures, particles, lighting
   game/         all simulation logic — pure of DOM/canvas, unit-tested
     config.ts   every tunable number (physics, world size, balance)
     world.ts    tile grid (Uint8Array), seeded procedural generation
@@ -52,4 +53,6 @@ Two rules keep it maintainable:
 - [x] M3 — fuel, cargo, surface stations (sell + refuel), money, death/respawn
 - [x] M4 — upgrade shop (drill/tank/cargo/hull + repair), gas pockets, lava, fall damage
 - [x] M5 — save/load (localStorage autosave at the surface), title screen
+- [x] M6 — visual overhaul: textured tiles, dusk sky + parallax hills, headlight
+      lighting at depth, particles, camera shake, pod & station sprites
 - [ ] Later — Tauri wrapper for a native Linux build (Steam Deck)

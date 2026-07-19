@@ -1,15 +1,12 @@
 import { Camera } from "../engine/camera";
 import type { Input } from "../engine/input";
-import { lerp } from "../engine/math";
-import { drawHud } from "../ui/hud";
 import { ShopOverlay } from "../ui/shop";
 import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
-import { addToCargo, cargoUnits, refuelPlan } from "./economy";
+import { addToCargo, refuelPlan } from "./economy";
 import { digHazard, fallDamage } from "./hazards";
 import { createPlayer, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
-import { hash2d } from "./rng";
 import {
   applyPlayerSave,
   applyWorldSave,
@@ -19,8 +16,8 @@ import {
   type SaveData,
   type SaveStorage,
 } from "./save";
-import { STATIONS, stationInSpan, type Station } from "./stations";
-import { TILE_DEFS, TileId } from "./tiles";
+import { stationInSpan, type Station } from "./stations";
+import { TILE_DEFS } from "./tiles";
 import {
   createUpgradeState,
   currentTier,
@@ -31,6 +28,15 @@ import {
 import { World } from "./world";
 
 export type GameState = "title" | "playing" | "shop" | "dead";
+
+/** One-shot visual events for the renderer to consume (world coordinates). */
+export interface FxEvent {
+  kind: "dug" | "impact" | "explosion";
+  x: number;
+  y: number;
+  color?: string;
+  power?: number;
+}
 
 /** Interval between surface autosaves while the pod is parked topside. */
 const AUTOSAVE_INTERVAL = 5;
@@ -45,12 +51,14 @@ export class Game {
   readonly upgrades: UpgradeState = createUpgradeState();
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
+  toast: { text: string; timeLeft: number } | null = null;
+  /** Drained by the renderer each frame; capped so it can't grow headless. */
+  readonly fxEvents: FxEvent[] = [];
 
   private readonly shop = new ShopOverlay();
   private readonly storage: SaveStorage | null;
   private pendingSave: SaveData | null;
   private thrusting = false;
-  private toast: { text: string; timeLeft: number } | null = null;
   private justClosedShop = false;
   private autosaveTimer = 0;
 
@@ -64,8 +72,26 @@ export class Game {
     this.camera = new Camera(viewWidth, viewHeight);
   }
 
+  resize(viewWidth: number, viewHeight: number): void {
+    this.camera.resize(viewWidth, viewHeight);
+  }
+
   get hasSave(): boolean {
     return this.pendingSave !== null;
+  }
+
+  get isThrusting(): boolean {
+    return this.thrusting;
+  }
+
+  /** Depth of the pod's feet below the surface, in tiles ("meters" on the HUD). */
+  get depth(): number {
+    const feetRow = Math.floor((this.player.y + this.player.height) / TILE);
+    return Math.max(0, feetRow - this.world.surfaceRow);
+  }
+
+  get drillPower(): number {
+    return DRILL.basePower * currentTier("drill", this.upgrades).value;
   }
 
   startNewGame(): void {
@@ -94,16 +120,6 @@ export class Game {
     const data = captureSave(this.world, this.player, this.money, this.upgrades);
     writeSave(this.storage, data);
     this.pendingSave = data;
-  }
-
-  resize(viewWidth: number, viewHeight: number): void {
-    this.camera.resize(viewWidth, viewHeight);
-  }
-
-  /** Depth of the pod's feet below the surface, in tiles ("meters" on the HUD). */
-  get depth(): number {
-    const feetRow = Math.floor((this.player.y + this.player.height) / TILE);
-    return Math.max(0, feetRow - this.world.surfaceRow);
   }
 
   update(dt: number, input: Input): void {
@@ -141,10 +157,14 @@ export class Game {
     const crash = fallDamage(p.impactSpeed);
     if (crash > 0) {
       this.showToast(`HARD LANDING! −${Math.round(crash)} hull`, 2);
+      this.pushFx({ kind: "impact", x: p.x + p.width / 2, y: p.y + p.height, power: crash });
       this.applyDamage(crash, "Hull shattered on impact");
       if (this.state !== "playing") return;
     }
 
+    // Remember the dig target so effects know where the tile was after it pops.
+    const digX = p.digTargetX;
+    const digY = p.digTargetY;
     const dug = updateDrilling(
       p,
       this.world,
@@ -157,16 +177,22 @@ export class Game {
       dt,
     );
     if (dug !== null) {
+      const cx = digX * TILE + TILE / 2;
+      const cy = digY * TILE + TILE / 2;
       const hazard = digHazard(dug);
       if (hazard) {
         this.showToast(hazard.toast, 2);
+        this.pushFx({ kind: "explosion", x: cx, y: cy });
         this.applyDamage(hazard.damage, hazard.cause);
         if (this.state !== "playing") return;
-      } else if (TILE_DEFS[dug].value > 0) {
-        if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
-          this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
-        } else {
-          this.showToast("CARGO FULL — mineral lost", 2);
+      } else {
+        this.pushFx({ kind: "dug", x: cx, y: cy, color: TILE_DEFS[dug].color });
+        if (TILE_DEFS[dug].value > 0) {
+          if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
+            this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
+          } else {
+            this.showToast("CARGO FULL — mineral lost", 2);
+          }
         }
       }
     }
@@ -210,8 +236,10 @@ export class Game {
     return stationInSpan(left, right);
   }
 
-  get drillPower(): number {
-    return DRILL.basePower * currentTier("drill", this.upgrades).value;
+  stationHint(): string | null {
+    if (this.state !== "playing") return null;
+    const station = this.currentStation();
+    return station ? `[E] enter ${station.label}` : null;
   }
 
   applyDamage(amount: number, cause: string): void {
@@ -273,225 +301,8 @@ export class Game {
     this.toast = { text, timeLeft: seconds };
   }
 
-  render(ctx: CanvasRenderingContext2D, alpha: number): void {
-    const p = this.player;
-    const px = lerp(p.prevX, p.x, alpha);
-    const py = lerp(p.prevY, p.y, alpha);
-    // Camera tracks the interpolated position so scrolling stays smooth.
-    this.camera.follow(
-      px + p.width / 2,
-      py + p.height / 2,
-      this.world.pixelWidth,
-      this.world.pixelHeight,
-    );
-
-    this.drawSky(ctx);
-    this.drawTiles(ctx);
-    this.drawStations(ctx);
-    this.drawPlayer(ctx, px - this.camera.x, py - this.camera.y);
-    if (this.state === "title") {
-      this.drawTitleScreen(ctx);
-      return;
-    }
-    drawHud(ctx, {
-      depth: this.depth,
-      fuel: p.fuel,
-      maxFuel: p.maxFuel,
-      hull: p.hull,
-      maxHull: p.maxHull,
-      money: this.money,
-      cargoUnits: cargoUnits(p.cargo),
-      cargoCapacity: p.cargoCapacity,
-      hint: this.stationHint(),
-      toast: this.toast,
-    });
-    if (this.state === "dead") this.drawDeathScreen(ctx);
+  private pushFx(event: FxEvent): void {
+    this.fxEvents.push(event);
+    if (this.fxEvents.length > 64) this.fxEvents.shift();
   }
-
-  private stationHint(): string | null {
-    if (this.state !== "playing") return null;
-    const station = this.currentStation();
-    return station ? `[E] enter ${station.label}` : null;
-  }
-
-  private drawSky(ctx: CanvasRenderingContext2D): void {
-    const grad = ctx.createLinearGradient(0, 0, 0, this.camera.viewHeight);
-    grad.addColorStop(0, "#8ecdf0");
-    grad.addColorStop(1, "#5f9fcf");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.camera.viewWidth, this.camera.viewHeight);
-  }
-
-  private drawTiles(ctx: CanvasRenderingContext2D): void {
-    const cam = this.camera;
-    const x0 = Math.max(0, Math.floor(cam.x / TILE));
-    const y0 = Math.max(0, Math.floor(cam.y / TILE));
-    const x1 = Math.min(this.world.width - 1, Math.floor((cam.x + cam.viewWidth) / TILE));
-    const y1 = Math.min(this.world.height - 1, Math.floor((cam.y + cam.viewHeight) / TILE));
-
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        const tile = this.world.getTile(tx, ty);
-        if (tile === TileId.Sky) continue;
-        const sx = tx * TILE - cam.x;
-        const sy = ty * TILE - cam.y;
-        const def = TILE_DEFS[tile];
-
-        if (def.value > 0) {
-          // Minerals render as a colored lode embedded in dirt.
-          ctx.fillStyle = TILE_DEFS[TileId.Dirt].color;
-          ctx.fillRect(sx, sy, TILE, TILE);
-          ctx.fillStyle = def.color;
-          ctx.beginPath();
-          const wobble = hash2d(tx, ty, 7) * 6 - 3;
-          ctx.ellipse(sx + TILE / 2 + wobble, sy + TILE / 2, 10, 8, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.fillStyle = def.color;
-          ctx.fillRect(sx, sy, TILE, TILE);
-        }
-
-        // Deterministic per-tile shading breaks up the flat color grid.
-        if (tile !== TileId.Empty) {
-          ctx.fillStyle = `rgba(0,0,0,${(hash2d(tx, ty, this.world.seed) * 0.14).toFixed(3)})`;
-          ctx.fillRect(sx, sy, TILE, TILE);
-        }
-      }
-    }
-
-    // Active dig target: reveal the hole in proportion to progress.
-    const p = this.player;
-    if (p.hasDigTarget) {
-      ctx.fillStyle = TILE_DEFS[TileId.Empty].color;
-      ctx.globalAlpha = Math.min(1, p.digProgress);
-      ctx.fillRect(p.digTargetX * TILE - cam.x, p.digTargetY * TILE - cam.y, TILE, TILE);
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  private drawStations(ctx: CanvasRenderingContext2D): void {
-    const cam = this.camera;
-    const groundY = this.world.surfaceRow * TILE;
-    for (const s of STATIONS) {
-      const sx = s.x0 * TILE - cam.x;
-      const w = (s.x1 - s.x0 + 1) * TILE;
-      const h = TILE * 2.2;
-      const sy = groundY - h - cam.y;
-      if (sx + w < 0 || sx > cam.viewWidth) continue;
-
-      ctx.fillStyle = s.color;
-      ctx.beginPath();
-      ctx.roundRect(sx, sy, w, h, [6, 6, 0, 0]);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.25)";
-      ctx.fillRect(sx + 8, sy + 10, w - 16, 14);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "11px monospace";
-      ctx.textBaseline = "top";
-      const tw = ctx.measureText(s.label).width;
-      ctx.fillText(s.label, sx + (w - tw) / 2, sy + h - 20);
-      ctx.font = "14px monospace";
-    }
-  }
-
-  private drawPlayer(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
-    const p = this.player;
-
-    if (this.thrusting && this.state === "playing") {
-      ctx.fillStyle = "#ff9d2e";
-      ctx.beginPath();
-      ctx.moveTo(sx + p.width * 0.3, sy + p.height);
-      ctx.lineTo(sx + p.width * 0.7, sy + p.height);
-      ctx.lineTo(sx + p.width * 0.5, sy + p.height + 10 + Math.random() * 4);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.fillStyle = "#c23b22";
-    ctx.beginPath();
-    ctx.roundRect(sx, sy, p.width, p.height, 6);
-    ctx.fill();
-
-    ctx.fillStyle = "#bde3f5";
-    ctx.beginPath();
-    ctx.arc(sx + p.width / 2 + p.facing * 4, sy + p.height * 0.4, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Drill: points at the dig target while digging, otherwise hangs below.
-    ctx.fillStyle = "#8a8f98";
-    ctx.beginPath();
-    if (p.hasDigTarget && p.digTargetX * TILE < p.x - 1) {
-      ctx.moveTo(sx, sy + p.height * 0.55);
-      ctx.lineTo(sx, sy + p.height * 0.85);
-      ctx.lineTo(sx - 8, sy + p.height * 0.7);
-    } else if (p.hasDigTarget && p.digTargetX * TILE > p.x + 1) {
-      ctx.moveTo(sx + p.width, sy + p.height * 0.55);
-      ctx.lineTo(sx + p.width, sy + p.height * 0.85);
-      ctx.lineTo(sx + p.width + 8, sy + p.height * 0.7);
-    } else {
-      ctx.moveTo(sx + p.width * 0.35, sy + p.height);
-      ctx.lineTo(sx + p.width * 0.65, sy + p.height);
-      ctx.lineTo(sx + p.width * 0.5, sy + p.height + 7);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  private drawTitleScreen(ctx: CanvasRenderingContext2D): void {
-    const { viewWidth, viewHeight } = this.camera;
-    ctx.fillStyle = "rgba(10, 8, 4, 0.65)";
-    ctx.fillRect(0, 0, viewWidth, viewHeight);
-
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "#f0c020";
-    ctx.font = "bold 52px monospace";
-    center(ctx, "MOTHERLOAD", viewWidth, viewHeight * 0.28);
-    ctx.fillStyle = "#c9ccd4";
-    ctx.font = "15px monospace";
-    center(ctx, "dig deep · sell minerals · upgrade · don't run dry", viewWidth, viewHeight * 0.28 + 68);
-
-    ctx.fillStyle = "#ffe97a";
-    ctx.font = "17px monospace";
-    center(
-      ctx,
-      this.hasSave ? "[Enter] continue" : "[Enter] start digging",
-      viewWidth,
-      viewHeight * 0.55,
-    );
-    if (this.hasSave) {
-      ctx.fillStyle = "#c9ccd4";
-      ctx.font = "14px monospace";
-      center(ctx, "[N] new game (overwrites the save)", viewWidth, viewHeight * 0.55 + 30);
-    }
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "13px monospace";
-    center(ctx, "← → fly/dig · ↑ thrust · ↓ drill · E station", viewWidth, viewHeight * 0.55 + 64);
-    ctx.font = "14px monospace";
-  }
-
-  private drawDeathScreen(ctx: CanvasRenderingContext2D): void {
-    const { viewWidth, viewHeight } = this.camera;
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(0, 0, viewWidth, viewHeight);
-    ctx.fillStyle = "#e04a3a";
-    ctx.font = "28px monospace";
-    ctx.textBaseline = "top";
-    center(ctx, "POD LOST", viewWidth, viewHeight * 0.4);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "15px monospace";
-    center(ctx, this.deathCause, viewWidth, viewHeight * 0.4 + 44);
-    center(
-      ctx,
-      `Salvage fee $${ECONOMY.salvageFee} · cargo lost`,
-      viewWidth,
-      viewHeight * 0.4 + 68,
-    );
-    ctx.fillStyle = "#ffe97a";
-    center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 104);
-    ctx.font = "14px monospace";
-  }
-}
-
-function center(ctx: CanvasRenderingContext2D, text: string, viewWidth: number, y: number): void {
-  ctx.fillText(text, (viewWidth - ctx.measureText(text).width) / 2, y);
 }

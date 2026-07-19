@@ -1,6 +1,7 @@
 import { Loop } from "./engine/loop";
 import { Input } from "./engine/input";
 import { Game } from "./game/game";
+import { Renderer } from "./render/renderer";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
 if (!canvas) throw new Error("missing #game canvas");
@@ -11,6 +12,7 @@ const input = new Input();
 input.attach(window);
 
 const game = new Game(window.innerWidth, window.innerHeight, window.localStorage);
+const renderer = new Renderer();
 
 // Dev-only handle for debugging and driving the game from the console/tests.
 if (import.meta.env.DEV) {
@@ -35,6 +37,6 @@ new Loop({
     input.endFrame();
   },
   render(alpha) {
-    game.render(ctx!, alpha);
+    renderer.render(ctx!, game, alpha);
   },
 }).start();
