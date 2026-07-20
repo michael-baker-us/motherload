@@ -46,4 +46,15 @@ export class Input {
     this.held.clear();
     this.pressed.clear();
   }
+
+  /** Simulate a key going down — used by on-screen touch controls. */
+  press(code: string): void {
+    if (!this.held.has(code)) this.pressed.add(code);
+    this.held.add(code);
+  }
+
+  /** Simulate a key going up — used by on-screen touch controls. */
+  release(code: string): void {
+    this.held.delete(code);
+  }
 }

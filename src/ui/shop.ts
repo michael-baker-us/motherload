@@ -39,7 +39,7 @@ export class ShopOverlay {
 
     const panel = document.createElement("div");
     panel.style.cssText =
-      "background:rgba(16,19,26,0.82);backdrop-filter:blur(12px);color:#e8e8e8;" +
+      "position:relative;background:rgba(16,19,26,0.82);backdrop-filter:blur(12px);color:#e8e8e8;" +
       "border:1px solid rgba(255,255,255,0.14);border-radius:14px;" +
       "box-shadow:0 18px 50px rgba(0,0,0,0.55);padding:22px 26px;min-width:330px;";
 
@@ -48,6 +48,7 @@ export class ShopOverlay {
     title.style.cssText =
       "font-size:18px;font-weight:bold;margin-bottom:12px;letter-spacing:1px;";
     panel.appendChild(title);
+    panel.appendChild(this.closeButton());
 
     const body = document.createElement("div");
     panel.appendChild(body);
@@ -184,6 +185,20 @@ export class ShopOverlay {
     div.textContent = text;
     div.style.cssText = "margin:4px 0;white-space:pre;";
     this.body?.appendChild(div);
+  }
+
+  /** Tap/click target for touch devices, which have no Escape key. */
+  private closeButton(): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.textContent = "✕";
+    btn.setAttribute("aria-label", "Close");
+    btn.style.cssText =
+      "position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;" +
+      "font-family:monospace;font-size:15px;line-height:1;cursor:pointer;color:#fff;" +
+      "border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
+      "background:rgba(255,255,255,0.08);";
+    btn.addEventListener("click", () => this.close());
+    return btn;
   }
 
   private button(label: string, enabled: boolean, onClick: () => void): void {

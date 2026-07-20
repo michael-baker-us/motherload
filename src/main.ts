@@ -5,6 +5,7 @@ import { Input } from "./engine/input";
 import { Game } from "./game/game";
 import { loadViewPrefs } from "./render/prefs";
 import { Renderer } from "./render/renderer";
+import { TouchControls } from "./ui/touchControls";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
 if (!canvas) throw new Error("missing #game canvas");
@@ -19,6 +20,9 @@ const game = new Game(window.innerWidth, window.innerHeight, window.localStorage
 const renderer = new Renderer();
 const audio = new AudioEngine(loadAudioSettings(window.localStorage), window.localStorage);
 audio.attach(window);
+
+const touchControls = new TouchControls();
+touchControls.mount(input);
 
 // Dev-only handle for debugging and driving the game from the console/tests.
 if (import.meta.env.DEV) {
@@ -49,5 +53,6 @@ new Loop({
     // Audio reads fxEvents before the renderer drains them.
     audio.frame(game);
     renderer.render(ctx!, game, alpha);
+    touchControls.sync(game);
   },
 }).start();
