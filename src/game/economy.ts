@@ -1,3 +1,4 @@
+import { ECONOMY } from "./config";
 import { TILE_DEFS, type TileId } from "./tiles";
 
 /** Cargo manifest: mineral tile -> count. */
@@ -24,6 +25,14 @@ export function addToCargo(cargo: Cargo, tile: TileId, capacity: number): boolea
   if (cargoUnits(cargo) + TILE_DEFS[tile].cargoUnits > capacity) return false;
   cargo.set(tile, (cargo.get(tile) ?? 0) + 1);
   return true;
+}
+
+/**
+ * The bill for losing a pod: a flat floor early on, a share of your cash once
+ * you're rich. The caller clamps money at zero — going broke is the limit.
+ */
+export function salvageFeeFor(money: number): number {
+  return Math.max(ECONOMY.salvageFee, Math.floor(money * ECONOMY.salvageFeeFraction));
 }
 
 /**

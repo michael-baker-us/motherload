@@ -1,5 +1,5 @@
 import { TILE } from "./config";
-import { TILE_DEFS, type TileId } from "./tiles";
+import { hardnessScaleAt, TILE_DEFS, type TileId } from "./tiles";
 import type { Player } from "./player";
 import type { World } from "./world";
 
@@ -42,7 +42,8 @@ export function updateDrilling(
   }
 
   // Undiggable tiles use a stand-in hardness under the dev override.
-  const hardness = TILE_DEFS[world.getTile(target.x, target.y)].hardness ?? 0.6;
+  const base = TILE_DEFS[world.getTile(target.x, target.y)].hardness ?? 0.6;
+  const hardness = base * hardnessScaleAt(target.y - world.surfaceRow);
 
   p.digProgress += (dt * drillPower) / hardness;
   if (p.digProgress < 1) return null;

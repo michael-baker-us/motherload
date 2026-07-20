@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { TILE } from "./config";
+import { DRILL, TILE } from "./config";
 import { updateDrilling, type DigIntent } from "./drilling";
 import { createPlayer, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
-import { TILE_DEFS, TileId } from "./tiles";
+import { hardnessScaleAt, TILE_DEFS, TileId } from "./tiles";
 import { World } from "./world";
 
 const SURFACE = 6;
@@ -89,6 +89,35 @@ describe("drilling", () => {
     world.setTile(Math.floor((p.x + p.width / 2) / TILE), SURFACE, TileId.Rock);
     const dug = digFrames(p, world, { ...NO_DIG, down: true }, 120);
     expect(dug).toBeNull();
+  });
+
+  it("hardness scale is 1× at the surface, grows with depth, and caps", () => {
+    expect(hardnessScaleAt(0)).toBe(1);
+    expect(hardnessScaleAt(DRILL.hardnessDepth)).toBe(2);
+    expect(hardnessScaleAt(1e9)).toBe(DRILL.hardnessMaxScale);
+  });
+
+  it("deep dirt takes proportionally longer to dig", () => {
+    const { world, p } = setup();
+    // Stand the pod in a carved pocket two hardness-bands down (3× soil).
+    const depth = DRILL.hardnessDepth * 2;
+    const row = SURFACE + depth;
+    const col = 10;
+    world.setTile(col, row - 1, TileId.Empty);
+    world.setTile(col, row, TileId.Dirt);
+    p.x = col * TILE + 3;
+    p.y = row * TILE - p.height;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vy = 0;
+    stepPlayer(p, world, IDLE, DT); // settle grounded on the dirt floor
+
+    const baseFrames = Math.ceil(TILE_DEFS[TileId.Dirt].hardness! / DT) + 1;
+    // Surface-time digging is nowhere near enough down here…
+    expect(digFrames(p, world, { ...NO_DIG, down: true }, baseFrames)).toBeNull();
+    // …but 3× the time (scale at this depth) finishes the tile.
+    const dug = digFrames(p, world, { ...NO_DIG, down: true }, baseFrames * 3);
+    expect(dug).toBe(TileId.Dirt);
   });
 
   it("digs bedrock with the dev digAnything override", () => {

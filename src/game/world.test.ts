@@ -129,3 +129,38 @@ describe("digging tiles", () => {
     expect(w.dig(-1, SURFACE, true)).toBeNull();
   });
 });
+
+describe("dynamite blast", () => {
+  it("clears a rounded blob including rock, and records it in the save diff", () => {
+    const w = makeWorld();
+    const cx = 10;
+    const cy = 60;
+    w.setTile(cx + 1, cy, TileId.Rock); // rock is exactly what dynamite is for
+    const destroyed = w.blast(cx, cy, 2.5);
+
+    expect(destroyed.length).toBeGreaterThan(0);
+    expect(w.getTile(cx, cy)).toBe(TileId.Empty);
+    expect(w.getTile(cx + 1, cy)).toBe(TileId.Empty);
+    expect(w.getTile(cx, cy + 2)).toBe(TileId.Empty);
+    // Corners of the bounding square are outside the circle.
+    expect(w.getTile(cx + 2, cy + 2)).not.toBe(TileId.Empty);
+    // Every cleared tile went through setTile, so the save diff has it.
+    expect(w.changes.size).toBeGreaterThanOrEqual(destroyed.length);
+  });
+
+  it("never breaches the bedrock border walls", () => {
+    const w = makeWorld();
+    w.blast(1, 60, 2.5);
+    expect(w.getTile(0, 60)).toBe(TileId.Rock);
+    w.blast(1, w.height - 2, 2.5);
+    expect(w.getTile(1, w.height - 1)).toBe(TileId.Rock);
+  });
+
+  it("never undermines the station district's bedrock strip", () => {
+    const w = makeWorld();
+    const col = STATIONS[0]!.x0 + 1;
+    w.blast(col, SURFACE - 1, 2.5); // blast centred right above the shop floor
+    expect(w.getTile(col, SURFACE)).toBe(TileId.Rock);
+    expect(w.getTile(col, SURFACE + 1)).toBe(TileId.Rock);
+  });
+});

@@ -1,5 +1,6 @@
 import { FUEL, HULL } from "../game/config";
 import { cargoValue, refuelPlan } from "../game/economy";
+import { ITEM_ORDER, ITEMS } from "../game/items";
 import type { Station } from "../game/stations";
 import { TILE_DEFS } from "../game/tiles";
 import { currentTier, nextTier, UPGRADES, type UpgradeTrack } from "../game/upgrades";
@@ -125,6 +126,23 @@ export class ShopOverlay {
       p.cargo.clear();
       game.pushFx({ kind: "sell", x: p.x + p.width / 2, y: p.y + p.height / 2 });
       this.render(station, game);
+    });
+
+    // The trader doubles as the supply store — insurance for the trip down.
+    this.line("");
+    this.line("SUPPLIES  (use with keys 1-4)");
+    ITEM_ORDER.forEach((id, i) => {
+      const def = ITEMS[id];
+      const owned = p.items[id];
+      const full = owned >= def.maxStack;
+      this.button(
+        `[${i + 1}] ${def.name} ×${owned} — ${def.blurb} — ${full ? "max carried" : `$${def.cost}`}`,
+        !full && game.money >= def.cost,
+        () => {
+          game.buyItem(id);
+          this.render(station, game);
+        },
+      );
     });
   }
 

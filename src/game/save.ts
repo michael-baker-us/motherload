@@ -1,4 +1,5 @@
 import type { Cargo } from "./economy";
+import { sanitizeInventory, type Inventory } from "./items";
 import type { Player } from "./player";
 import type { TileId } from "./tiles";
 import { UPGRADES, type UpgradeState, type UpgradeTrack } from "./upgrades";
@@ -27,6 +28,8 @@ export interface SaveData {
     fuel: number;
     hull: number;
     cargo: Array<[number, number]>;
+    /** Absent in pre-M9 saves — sanitized to an empty inventory on load. */
+    items?: Inventory;
   };
   money: number;
   upgrades: UpgradeState;
@@ -48,6 +51,7 @@ export function captureSave(
       fuel: player.fuel,
       hull: player.hull,
       cargo: [...player.cargo.entries()],
+      items: { ...player.items },
     },
     money,
     upgrades: { ...upgrades },
@@ -97,6 +101,7 @@ export function applyPlayerSave(player: Player, data: SaveData): void {
   player.fuel = Math.min(data.player.fuel, player.maxFuel);
   player.hull = Math.min(data.player.hull, player.maxHull);
   player.cargo = new Map(data.player.cargo) as Cargo;
+  player.items = sanitizeInventory(data.player.items);
 }
 
 export function loadSave(storage: SaveStorage): SaveData | null {

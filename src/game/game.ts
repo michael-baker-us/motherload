@@ -4,9 +4,17 @@ import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
 import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
-import { addToCargo, refuelPlan } from "./economy";
+import { addToCargo, refuelPlan, salvageFeeFor } from "./economy";
 import { digHazard, fallDamage } from "./hazards";
-import { createPlayer, type Player } from "./player";
+import {
+  DYNAMITE,
+  FUEL_CELL_UNITS,
+  ITEM_ORDER,
+  ITEMS,
+  REPAIR_KIT_HP,
+  type ItemId,
+} from "./items";
+import { createPlayer, spawnPoint, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import {
   applyPlayerSave,
@@ -68,6 +76,8 @@ export class Game {
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
   toast: { text: string; timeLeft: number; total: number } | null = null;
+  /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
+  fuse: { x: number; y: number; timeLeft: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
   readonly fxEvents: FxEvent[] = [];
   readonly cheats: DevCheats = {
@@ -191,6 +201,15 @@ export class Game {
     const p = this.player;
     if (this.cheats.unlimitedFuel) p.fuel = p.maxFuel;
     if (this.cheats.unlimitedFunds && this.money < DEV_MONEY) this.money = DEV_MONEY;
+
+    if (this.fuse && (this.fuse.timeLeft -= dt) <= 0) {
+      this.detonate();
+      if (this.state !== "playing") return;
+    }
+    ITEM_ORDER.forEach((id, i) => {
+      if (input.wasPressed(`Digit${i + 1}`)) this.useItem(id);
+    });
+
     const move: MoveInput = {
       thrustUp: input.isDown("ArrowUp", "KeyW", "Space") && p.fuel > 0,
       moveLeft: input.isDown("ArrowLeft", "KeyA"),
@@ -315,6 +334,94 @@ export class Game {
     return true;
   }
 
+  /** Buy one of a consumable at the trader. False if broke or carrying the max. */
+  buyItem(id: ItemId): boolean {
+    const def = ITEMS[id];
+    const items = this.player.items;
+    if (this.money < def.cost || items[id] >= def.maxStack) return false;
+    this.money -= def.cost;
+    items[id] += 1;
+    this.showToast(`${def.name} stowed`, 1.5);
+    return true;
+  }
+
+  /** Use a consumable by id (hotkeys 1-4). False if out or the effect would be wasted. */
+  useItem(id: ItemId): boolean {
+    const p = this.player;
+    if (p.items[id] <= 0) {
+      this.showToast(`No ${ITEMS[id].name.toLowerCase()} left`, 1.2);
+      return false;
+    }
+    switch (id) {
+      case "dynamite": {
+        if (this.fuse) return false; // one charge at a time
+        const centerCol = Math.floor((p.x + p.width / 2) / TILE);
+        const podRow = Math.floor((p.y + p.height / 2) / TILE);
+        this.fuse = { x: centerCol, y: podRow, timeLeft: DYNAMITE.fuseSeconds };
+        this.showToast("DYNAMITE ARMED — CLEAR OUT!", DYNAMITE.fuseSeconds);
+        break;
+      }
+      case "fuelCell": {
+        if (p.fuel >= p.maxFuel) {
+          this.showToast("Tank already full", 1.2);
+          return false;
+        }
+        p.fuel = Math.min(p.maxFuel, p.fuel + FUEL_CELL_UNITS);
+        this.showToast(`+${FUEL_CELL_UNITS} fuel`, 1.5);
+        break;
+      }
+      case "repairKit": {
+        if (p.hull >= p.maxHull) {
+          this.showToast("Hull already sound", 1.2);
+          return false;
+        }
+        p.hull = Math.min(p.maxHull, p.hull + REPAIR_KIT_HP);
+        this.showToast(`+${REPAIR_KIT_HP} hull`, 1.5);
+        break;
+      }
+      case "teleporter": {
+        if (p.grounded && this.depth === 0) {
+          this.showToast("Already at the surface", 1.2);
+          return false;
+        }
+        this.pushFx({ kind: "upgrade", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+        const home = spawnPoint(this.world);
+        p.x = home.x;
+        p.y = home.y;
+        p.prevX = home.x; // no interpolation streak across the world
+        p.prevY = home.y;
+        p.vx = 0;
+        p.vy = 0;
+        p.hasDigTarget = false;
+        p.digProgress = 0;
+        this.pushFx({ kind: "upgrade", x: home.x + p.width / 2, y: home.y + p.height / 2 });
+        this.showToast("Recalled to surface", 1.5);
+        break;
+      }
+    }
+    p.items[id] -= 1;
+    return true;
+  }
+
+  /** The armed charge goes off: clear tiles, hurt the pod if it lingered. */
+  private detonate(): void {
+    const fuse = this.fuse!;
+    this.fuse = null;
+    const cx = fuse.x * TILE + TILE / 2;
+    const cy = fuse.y * TILE + TILE / 2;
+    this.world.blast(fuse.x, fuse.y, DYNAMITE.radius);
+    this.pushFx({ kind: "explosion", x: cx, y: cy });
+    const p = this.player;
+    const dist =
+      Math.hypot(p.x + p.width / 2 - cx, p.y + p.height / 2 - cy) / TILE;
+    const falloff = 1 - dist / (DYNAMITE.radius + 1);
+    if (falloff > 0) {
+      const damage = Math.round(DYNAMITE.damage * falloff);
+      this.showToast(`CAUGHT IN THE BLAST! −${damage} hull`, 2);
+      this.applyDamage(damage, "Blown up by own dynamite");
+    }
+  }
+
   /** Repair as much hull as money covers, at HULL.repairPricePerHp. */
   repairHull(): boolean {
     const p = this.player;
@@ -333,9 +440,15 @@ export class Game {
     p.maxHull = currentTier("hull", this.upgrades).value;
   }
 
+  /** What losing the pod right now would cost — shown on the death screen. */
+  get salvageFeeDue(): number {
+    return salvageFeeFor(this.money);
+  }
+
   die(cause: string): void {
     this.state = "dead";
     this.deathCause = cause;
+    this.fuse = null;
     this.pushFx({
       kind: "death",
       x: this.player.x + this.player.width / 2,
@@ -343,9 +456,11 @@ export class Game {
     });
   }
 
-  /** Fresh pod at the surface: full tank and hull, cargo gone, salvage fee charged. Upgrades persist. */
+  /** Fresh pod at the surface: full tank and hull, cargo and items gone, salvage fee charged. Upgrades persist. */
   respawn(): void {
-    this.money = Math.max(0, this.money - ECONOMY.salvageFee);
+    const fee = Math.min(this.money, this.salvageFeeDue);
+    this.money -= fee;
+    this.showToast(`Salvage fee −$${fee}`, 2.5);
     const fresh = createPlayer(this.world);
     this.applyUpgrades(fresh);
     fresh.fuel = fresh.maxFuel;

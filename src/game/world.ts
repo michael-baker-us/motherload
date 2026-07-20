@@ -87,6 +87,29 @@ export class World {
   }
 
   /**
+   * Dynamite: destroy every solid tile within `radius` (euclidean, in tiles)
+   * of the blast-centre tile — rock included, which is dynamite's whole point.
+   * Protected: the bedrock border walls/floor, and rock in the top two ground
+   * rows (the station strip must never be undermined). Destroyed minerals are
+   * gone, not collected. Returns the tiles destroyed.
+   */
+  blast(cx: number, cy: number, radius: number): TileId[] {
+    const destroyed: TileId[] = [];
+    const r = Math.ceil(radius);
+    for (let y = cy - r; y <= cy + r; y++) {
+      for (let x = cx - r; x <= cx + r; x++) {
+        if ((x - cx) ** 2 + (y - cy) ** 2 > radius * radius) continue;
+        if (!this.inBounds(x, y) || !this.isSolid(x, y)) continue;
+        if (x === 0 || x === this.width - 1 || y === this.height - 1) continue;
+        if (y <= this.surfaceRow + 1 && !this.isDiggable(x, y)) continue;
+        destroyed.push(this.getTile(x, y));
+        this.setTile(x, y, TileId.Empty);
+      }
+    }
+    return destroyed;
+  }
+
+  /**
    * Remove a diggable tile. Returns what was removed, or null if undiggable.
    * `force` (dev cheat) digs any solid in-bounds tile, rock included.
    */

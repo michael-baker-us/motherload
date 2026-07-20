@@ -1,7 +1,8 @@
 import { clamp, lerp } from "../engine/math";
-import { ECONOMY, TILE, VIEW } from "../game/config";
+import { TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
+import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
 import { TILE_DEFS, TileId } from "../game/tiles";
@@ -138,6 +139,7 @@ export class Renderer {
     this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time);
     this.drawTiles(ctx, game);
     this.drawStations(ctx, game);
+    this.drawFuse(ctx, game, cam.x, cam.y);
     this.drawPod(ctx, game, px - cam.x, py - cam.y);
     this.drawParticles(ctx, game);
     this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
@@ -167,6 +169,11 @@ export class Renderer {
         hint: game.stationHint(),
         toast: game.toast,
         dev: game.devMode,
+        items: ITEM_ORDER.map((id, i) => ({
+          key: `${i + 1}`,
+          tag: ITEMS[id].tag,
+          count: p.items[id],
+        })),
       },
       dt,
     );
@@ -633,6 +640,32 @@ export class Renderer {
     ctx.font = "14px monospace";
   }
 
+  /** Armed dynamite: a stick on the tile plus a blast-radius ring, flashing faster as the fuse burns. */
+  private drawFuse(ctx: CanvasRenderingContext2D, game: Game, camX: number, camY: number): void {
+    const fuse = game.fuse;
+    if (!fuse) return;
+    const cx = fuse.x * TILE + TILE / 2 - camX;
+    const cy = fuse.y * TILE + TILE / 2 - camY;
+    const urgency = 1 - fuse.timeLeft / DYNAMITE.fuseSeconds;
+    const blink = 0.5 + 0.5 * Math.sin(this.time * (10 + urgency * 30));
+
+    ctx.save();
+    ctx.globalAlpha = 0.25 + blink * 0.2;
+    ctx.strokeStyle = "#ff5a1f";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, DYNAMITE.radius * TILE, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = "#b02318";
+    ctx.fillRect(cx - 5, cy - 2, 10, 7);
+    ctx.fillStyle = `rgba(255,233,122,${0.4 + blink * 0.6})`;
+    ctx.beginPath();
+    ctx.arc(cx + 4, cy - 4, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   private drawPod(ctx: CanvasRenderingContext2D, game: Game, sx: number, sy: number): void {
     const p = game.player;
     const w = p.width;
@@ -1040,7 +1073,7 @@ export class Renderer {
     ctx.fillStyle = "#ffffff";
     ctx.font = "15px monospace";
     center(ctx, game.deathCause, viewWidth, viewHeight * 0.4 + 46);
-    center(ctx, `Salvage fee $${ECONOMY.salvageFee} · cargo lost`, viewWidth, viewHeight * 0.4 + 70);
+    center(ctx, `Salvage fee $${game.salvageFeeDue} · cargo and supplies lost`, viewWidth, viewHeight * 0.4 + 70);
     ctx.fillStyle = "#ffe97a";
     center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 106);
     ctx.font = "14px monospace";

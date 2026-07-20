@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Input } from "../engine/input";
 import { ECONOMY, FUEL, TILE } from "./config";
 import { Game } from "./game";
+import { FUEL_CELL_UNITS, ITEMS, REPAIR_KIT_HP } from "./items";
+import { spawnPoint } from "./player";
 import { TileId } from "./tiles";
 
 const DT = 1 / 60;
@@ -25,6 +27,30 @@ function keysDown(...codes: string[]): Input {
     endFrame: () => {},
     reset: () => {},
   } as unknown as Input;
+}
+
+/** Input stub reporting the given keys freshly pressed (use for one update). */
+function keysPressed(...codes: string[]): Input {
+  return {
+    isDown: () => false,
+    wasPressed: (...q: string[]) => q.some((c) => codes.includes(c)),
+    endFrame: () => {},
+    reset: () => {},
+  } as unknown as Input;
+}
+
+/** Stand the pod grounded in a carved pocket at the given tile, floor set to dirt. */
+function placeInPocket(game: Game, col: number, row: number): void {
+  game.world.setTile(col, row, TileId.Empty);
+  game.world.setTile(col, row + 1, TileId.Dirt);
+  const p = game.player;
+  p.x = col * TILE + 3;
+  p.y = (row + 1) * TILE - p.height;
+  p.prevX = p.x;
+  p.prevY = p.y;
+  p.vx = 0;
+  p.vy = 0;
+  game.update(DT, idleInput); // settle so grounded is set
 }
 
 function fakeStorage(): SaveStorage {
@@ -150,7 +176,10 @@ describe("game state machine", () => {
     const first = makeGame(storage);
     first.money = 5000;
     first.buyUpgrade("tank");
-    first.world.dig(10, 6); // outside the station district's bedrock strip
+    // Outside the station district's bedrock strip; planted so a random
+    // worldgen roll of Rock (undiggable) can't flake the test.
+    first.world.setTile(10, 6, TileId.Dirt);
+    first.world.dig(10, 6);
     first.saveNow();
 
     const second = new Game(800, 600, storage);
@@ -236,6 +265,123 @@ describe("game state machine", () => {
     const game = makeGame();
     game.die("test");
     expect(game.fxEvents.some((e) => e.kind === "death")).toBe(true);
+  });
+
+  it("buying items costs money and respects stack caps", () => {
+    const game = makeGame();
+    game.money = 10000;
+    for (let i = 0; i < ITEMS.dynamite.maxStack; i++) {
+      expect(game.buyItem("dynamite")).toBe(true);
+    }
+    expect(game.buyItem("dynamite")).toBe(false); // carrying the max
+    expect(game.money).toBe(10000 - ITEMS.dynamite.maxStack * ITEMS.dynamite.cost);
+
+    game.money = 10;
+    expect(game.buyItem("fuelCell")).toBe(false); // broke
+  });
+
+  it("fuel cells and repair kits top up their stat and refuse when full", () => {
+    const game = makeGame();
+    const p = game.player;
+    p.items.fuelCell = 2;
+    p.fuel = 20;
+    expect(game.useItem("fuelCell")).toBe(true);
+    expect(p.fuel).toBe(Math.min(p.maxFuel, 20 + FUEL_CELL_UNITS));
+    expect(p.items.fuelCell).toBe(1);
+    p.fuel = p.maxFuel;
+    expect(game.useItem("fuelCell")).toBe(false); // don't waste it
+    expect(p.items.fuelCell).toBe(1);
+
+    p.items.repairKit = 1;
+    p.hull = 1;
+    expect(game.useItem("repairKit")).toBe(true);
+    expect(p.hull).toBe(Math.min(p.maxHull, 1 + REPAIR_KIT_HP));
+    expect(game.useItem("repairKit")).toBe(false); // none left
+  });
+
+  it("teleporter recalls the pod home from depth, but not from the surface", () => {
+    const game = makeGame();
+    const p = game.player;
+    p.items.teleporter = 2;
+    for (let i = 0; i < 5; i++) game.update(DT, idleInput); // settle at spawn
+    expect(game.useItem("teleporter")).toBe(false); // already home
+    expect(p.items.teleporter).toBe(2);
+
+    placeInPocket(game, 10, 100);
+    expect(game.useItem("teleporter")).toBe(true);
+    const home = spawnPoint(game.world);
+    expect(p.x).toBe(home.x);
+    expect(p.y).toBe(home.y);
+    expect(p.items.teleporter).toBe(1);
+  });
+
+  it("standing on your own dynamite blasts the terrain and the pod", () => {
+    const game = makeGame();
+    const p = game.player;
+    p.items.dynamite = 1;
+    placeInPocket(game, 10, 30);
+    game.world.setTile(9, 30, TileId.Goldium); // bystander mineral
+
+    // Arm via the hotkey, then idle until the fuse burns down.
+    game.update(DT, keysPressed("Digit1"));
+    expect(game.fuse).not.toBeNull();
+    expect(p.items.dynamite).toBe(0);
+    for (let i = 0; i < 100 && game.state === "playing"; i++) game.update(DT, idleInput);
+
+    expect(game.world.getTile(10, 31)).toBe(TileId.Empty); // floor gone
+    expect(game.world.getTile(9, 30)).toBe(TileId.Empty); // mineral destroyed…
+    expect(p.cargo.size).toBe(0); // …not collected
+    expect(game.fxEvents.some((e) => e.kind === "explosion")).toBe(true);
+    expect(game.state).toBe("dead"); // 35 damage at the centre beats a tin hull
+    expect(game.deathCause).toBe("Blown up by own dynamite");
+  });
+
+  it("flying clear of armed dynamite avoids the blast damage", () => {
+    const game = makeGame();
+    const p = game.player;
+    p.items.dynamite = 1;
+    placeInPocket(game, 10, 30);
+    expect(game.useItem("dynamite")).toBe(true);
+
+    // Whisk the pod back to the surface while the fuse burns.
+    const home = spawnPoint(game.world);
+    p.x = home.x;
+    p.y = home.y;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vy = 0;
+    for (let i = 0; i < 100 && game.fuse; i++) game.update(DT, idleInput);
+
+    expect(game.fuse).toBeNull();
+    expect(game.world.getTile(10, 31)).toBe(TileId.Empty); // it still went off
+    expect(p.hull).toBe(p.maxHull);
+    expect(game.state).toBe("playing");
+  });
+
+  it("death costs a wealth-scaled fee and every carried item", () => {
+    const game = makeGame();
+    game.money = 10000;
+    game.player.items.dynamite = 2;
+    game.player.items.teleporter = 1;
+    game.die("test");
+    game.respawn();
+    expect(game.money).toBe(10000 - 10000 * ECONOMY.salvageFeeFraction);
+    expect(game.player.items.dynamite).toBe(0);
+    expect(game.player.items.teleporter).toBe(0);
+  });
+
+  it("items survive save and continue", () => {
+    const storage = fakeStorage();
+    const first = makeGame(storage);
+    first.player.items.dynamite = 2;
+    first.player.items.repairKit = 1;
+    first.saveNow();
+
+    const second = new Game(800, 600, storage);
+    expect(second.continueGame()).toBe(true);
+    expect(second.player.items.dynamite).toBe(2);
+    expect(second.player.items.repairKit).toBe(1);
+    expect(second.player.items.fuelCell).toBe(0);
   });
 
   it("reports the station under a parked pod", () => {

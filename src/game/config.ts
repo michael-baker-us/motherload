@@ -33,6 +33,10 @@ export const POD = {
 export const DRILL = {
   // Multiplier on dig speed; tile hardness is seconds-to-dig at power 1.
   basePower: 1,
+  // Soil stiffens with depth so drill upgrades gate the descent:
+  // hardness ×= 1 + depth / hardnessDepth, capped at hardnessMaxScale.
+  hardnessDepth: 220, // tiles per extra 1× hardness
+  hardnessMaxScale: 6,
 };
 
 export const FUEL = {
@@ -46,7 +50,8 @@ export const FUEL = {
 export const ECONOMY = {
   startingMoney: 25,
   cargoCapacity: 10, // cargo units the bay holds
-  salvageFee: 100, // $ charged when the pod is lost
+  salvageFee: 100, // $ floor charged when the pod is lost
+  salvageFeeFraction: 0.15, // fraction of cash the fee grows to — death must sting rich pilots too
 };
 
 export const HULL = {

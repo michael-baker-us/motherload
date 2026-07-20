@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addToCargo, cargoUnits, cargoValue, refuelPlan, type Cargo } from "./economy";
+import { ECONOMY } from "./config";
+import { addToCargo, cargoUnits, cargoValue, refuelPlan, salvageFeeFor, type Cargo } from "./economy";
 import { TILE_DEFS, TileId } from "./tiles";
 
 describe("cargo", () => {
@@ -22,6 +23,18 @@ describe("cargo", () => {
     expect(addToCargo(cargo, TileId.Diamond, 4)).toBe(false);
     expect(cargo.has(TileId.Diamond)).toBe(false);
     expect(cargoUnits(cargo)).toBe(4);
+  });
+});
+
+describe("salvageFeeFor", () => {
+  it("charges the flat floor to poor pilots", () => {
+    expect(salvageFeeFor(0)).toBe(ECONOMY.salvageFee);
+    expect(salvageFeeFor(500)).toBe(ECONOMY.salvageFee);
+  });
+
+  it("grows to a share of cash for rich pilots", () => {
+    expect(salvageFeeFor(10000)).toBe(10000 * ECONOMY.salvageFeeFraction);
+    expect(salvageFeeFor(10000)).toBeGreaterThan(ECONOMY.salvageFee);
   });
 });
 

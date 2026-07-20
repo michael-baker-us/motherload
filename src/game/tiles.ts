@@ -1,3 +1,5 @@
+import { DRILL } from "./config";
+
 export enum TileId {
   Sky = 0, // above the surface, never solid
   Empty, // dug-out tunnel
@@ -66,6 +68,15 @@ export const MINERAL_BANDS: MineralBand[] = [
 /** Rock density grows with depth so the deep game is more of a maze. */
 export function rockChanceAt(depth: number): number {
   return Math.min(0.03 + depth * 0.00006, 0.15);
+}
+
+/**
+ * Soil stiffens with depth: the effective hardness of any tile is its base
+ * hardness times this. This is what makes drill upgrades matter — a rusty
+ * drill that chews the topsoil crawls at 500 m.
+ */
+export function hardnessScaleAt(depth: number): number {
+  return Math.min(1 + Math.max(0, depth) / DRILL.hardnessDepth, DRILL.hardnessMaxScale);
 }
 
 export function bandChanceAt(band: MineralBand, depth: number): number {

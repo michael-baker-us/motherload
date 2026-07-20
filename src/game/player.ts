@@ -1,5 +1,6 @@
 import { ECONOMY, FUEL, HULL, POD, TILE } from "./config";
 import type { Cargo } from "./economy";
+import { createInventory, type Inventory } from "./items";
 import type { World } from "./world";
 
 export interface Player {
@@ -30,13 +31,21 @@ export interface Player {
   cargoCapacity: number;
   hull: number;
   maxHull: number;
+  /** Consumables ride in the pod — lost with it, unlike money and upgrades. */
+  items: Inventory;
+}
+
+/** Where a fresh pod stands: on the surface, centered horizontally. */
+export function spawnPoint(world: World): { x: number; y: number } {
+  const tileX = Math.floor(world.width / 2);
+  return {
+    x: tileX * TILE + (TILE - POD.width) / 2,
+    y: world.surfaceRow * TILE - POD.height,
+  };
 }
 
 export function createPlayer(world: World): Player {
-  // Spawn standing on the surface, centered horizontally.
-  const tileX = Math.floor(world.width / 2);
-  const x = tileX * TILE + (TILE - POD.width) / 2;
-  const y = world.surfaceRow * TILE - POD.height;
+  const { x, y } = spawnPoint(world);
   return {
     x,
     y,
@@ -61,5 +70,6 @@ export function createPlayer(world: World): Player {
     cargoCapacity: ECONOMY.cargoCapacity,
     hull: HULL.base,
     maxHull: HULL.base,
+    items: createInventory(),
   };
 }
