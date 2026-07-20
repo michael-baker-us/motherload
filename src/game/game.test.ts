@@ -63,19 +63,40 @@ function fakeStorage(): SaveStorage {
 }
 
 describe("game state machine", () => {
-  it("drains fuel over time while idle", () => {
+  it("does not drain fuel while grounded and idle", () => {
     const game = makeGame();
+    game.update(DT, idleInput); // settle onto the surface
+    expect(game.player.grounded).toBe(true);
     const start = game.player.fuel;
     for (let i = 0; i < 60; i++) game.update(DT, idleInput);
-    expect(game.player.fuel).toBeLessThan(start);
-    expect(game.player.fuel).toBeCloseTo(start - FUEL.idleBurn, 1);
+    expect(game.player.fuel).toBe(start);
+  });
+
+  it("drains fuel over time while airborne and idle", () => {
+    const game = makeGame();
+    const col = Math.floor(game.world.width / 2);
+    const startRow = game.world.surfaceRow + 5;
+    for (let r = startRow; r < startRow + 10; r++) game.world.setTile(col, r, TileId.Empty);
+    const p = game.player;
+    p.x = col * TILE + 3;
+    p.y = startRow * TILE;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vx = 0;
+    p.vy = 0;
+
+    const start = p.fuel;
+    for (let i = 0; i < 5; i++) game.update(DT, idleInput);
+    expect(p.grounded).toBe(false);
+    expect(p.fuel).toBeCloseTo(start - FUEL.idleBurn * DT * 5, 2);
   });
 
   it("kills the pod when fuel runs out", () => {
     const game = makeGame();
     game.player.fuel = 0.001;
+    const thrustInput = keysDown("ArrowUp"); // burn must not depend on being grounded
     for (let i = 0; i < 10 && game.state === "playing"; i++) {
-      game.update(DT, idleInput);
+      game.update(DT, thrustInput);
     }
     expect(game.state).toBe("dead");
     expect(game.deathCause).toBe("Out of fuel");
@@ -85,7 +106,7 @@ describe("game state machine", () => {
     const game = makeGame();
     game.player.cargo.set(TileId.Goldium, 3);
     game.player.fuel = 0.001;
-    game.update(DT, idleInput);
+    game.update(DT, keysDown("ArrowUp")); // burn must not depend on being grounded
     expect(game.state).toBe("dead");
 
     const moneyBefore = game.money;
@@ -226,7 +247,8 @@ describe("game state machine", () => {
     game.toggleCheat("unlimitedFunds");
     expect(game.devMode).toBe(false);
     const fuel = game.player.fuel;
-    for (let i = 0; i < 60; i++) game.update(DT, idleInput);
+    // Grounded idle burn is zero, so hold thrust to confirm burn actually resumed.
+    for (let i = 0; i < 60; i++) game.update(DT, keysDown("ArrowUp"));
     expect(game.player.fuel).toBeLessThan(fuel);
   });
 

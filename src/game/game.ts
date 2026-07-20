@@ -263,7 +263,7 @@ export class Game {
       }
     }
 
-    let burn = FUEL.idleBurn;
+    let burn = p.grounded ? 0 : FUEL.idleBurn;
     if (this.thrusting) burn += FUEL.thrustBurn;
     if (p.hasDigTarget) burn += FUEL.digBurn;
     p.fuel = Math.max(0, p.fuel - burn * dt);
