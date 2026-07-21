@@ -77,6 +77,11 @@ export class Renderer {
   private drillAngle = 0;
   private drillTargetAngle = 0;
   private drillHold = 0;
+  // Drill "bite" feedback: a recoil impulse that pops on break, and the last
+  // dig direction so the recoil kicks the pod back out of the hole it cleared.
+  private drillRecoil = 0;
+  private lastDigDX = 0;
+  private lastDigDY = 1;
 
   constructor() {
     this.textures = makeTileTextures();
@@ -127,9 +132,13 @@ export class Renderer {
     this.consumeFx(game.fxEvents);
     this.emitContinuousFx(game, px, py);
     this.updateParticles(dt);
-    // Fine tremor while the drill is biting, decaying shake otherwise.
-    if (p.hasDigTarget && game.state === "playing") this.shake = Math.max(this.shake, 0.1);
+    // Tremor while the drill bites, building as the tile is about to give so
+    // the break has something to release. Decaying shake and recoil otherwise.
+    if (p.hasDigTarget && game.state === "playing") {
+      this.shake = Math.max(this.shake, 0.06 + clamp(p.digProgress, 0, 1) * 0.14);
+    }
     this.shake = Math.max(0, this.shake - dt * 1.6);
+    this.drillRecoil = Math.max(0, this.drillRecoil - dt * 7);
     this.flash = Math.max(0, this.flash - dt * 2.2);
 
     const shakeMag = this.shake * this.shake * 22;
@@ -185,7 +194,12 @@ export class Renderer {
   private consumeFx(events: FxEvent[]): void {
     for (const e of events) {
       if (e.kind === "dug") {
-        this.burst(e.x, e.y, 10, e.color ?? "#8a4a2a", 90, 700, false);
+        // The tile gives way: debris burst plus a short pop of shake and a
+        // recoil kick so breaking through feels like contact, not a timer.
+        this.burst(e.x, e.y, 13, e.color ?? "#8a4a2a", 120, 700, false);
+        this.burst(e.x, e.y, 4, "#ffd9a0", 70, 400, true); // grit sparks
+        this.shake = Math.max(this.shake, 0.28);
+        this.drillRecoil = 1;
       } else if (e.kind === "impact") {
         this.burst(e.x, e.y, 14, "#a4643c", 130, 300, false);
         this.shake = Math.max(this.shake, clamp((e.power ?? 0) / 60, 0.25, 0.6));
@@ -220,8 +234,10 @@ export class Renderer {
         additive: Math.random() > 0.6,
       });
     }
-    if (p.hasDigTarget && Math.random() > 0.35) {
-      const sparky = Math.random() > 0.7;
+    // Grind debris from the contact point, thickening as the bite deepens.
+    const bite = clamp(p.digProgress, 0, 1);
+    if (p.hasDigTarget && Math.random() < 0.4 + bite * 0.45) {
+      const sparky = Math.random() > 0.7 - bite * 0.25; // more sparks near break
       this.spawn({
         x: p.digTargetX * TILE + TILE / 2 + (Math.random() - 0.5) * 16,
         y: p.digTargetY * TILE + TILE / 2 + (Math.random() - 0.5) * 16,
@@ -670,6 +686,26 @@ export class Renderer {
     const p = game.player;
     const w = p.width;
     const h = p.height;
+
+    // Drill "bite" nudge: lean the whole rig into the tile as pressure builds
+    // and buzz with the grind; the recoil (set on break) then kicks it back out
+    // of the hole, so drilling reads as contact rather than a silent timer.
+    if (p.hasDigTarget) {
+      const podCol = Math.floor((p.x + w / 2) / TILE);
+      const podRow = Math.floor((p.y + h / 2) / TILE);
+      this.lastDigDX = p.digTargetY > podRow ? 0 : p.digTargetX < podCol ? -1 : p.digTargetX > podCol ? 1 : 0;
+      this.lastDigDY = p.digTargetY > podRow ? 1 : 0;
+      const bite = clamp(p.digProgress, 0, 1);
+      const lean = 1 + bite * 2;
+      const buzz = (0.5 + bite) * 1.3;
+      sx += this.lastDigDX * lean + (Math.random() - 0.5) * buzz;
+      sy += this.lastDigDY * lean + (Math.random() - 0.5) * buzz;
+    }
+    if (this.drillRecoil > 0) {
+      const kick = this.drillRecoil * 3;
+      sx -= this.lastDigDX * kick;
+      sy -= this.lastDigDY * kick;
+    }
 
     // Thruster flame: layered, flickering, glowing.
     if (game.isThrusting && game.state === "playing") {
