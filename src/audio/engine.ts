@@ -54,15 +54,28 @@ export class AudioEngine {
     return this.ctx?.state ?? null;
   }
 
-  /** Unlock audio on the first key press or click, then stop listening. */
+  /**
+   * Unlock audio on a user gesture. Mobile browsers (iOS Safari especially)
+   * start the context suspended and only let it run from inside a gesture, so
+   * we keep listening until it's genuinely `running` — the first `resume()`
+   * often no-ops on iOS — and re-resume whenever the tab becomes visible again,
+   * since iOS re-suspends the context on lock/tab-away/audio interruptions.
+   */
   attach(target: Window): void {
     const unlock = (): void => {
       this.ensureContext();
-      target.removeEventListener("keydown", unlock);
-      target.removeEventListener("pointerdown", unlock);
+      if (this.ctx?.state === "running") {
+        target.removeEventListener("keydown", unlock);
+        target.removeEventListener("pointerdown", unlock);
+        target.removeEventListener("touchend", unlock);
+      }
     };
     target.addEventListener("keydown", unlock);
     target.addEventListener("pointerdown", unlock);
+    target.addEventListener("touchend", unlock);
+    target.document.addEventListener("visibilitychange", () => {
+      if (target.document.visibilityState === "visible") void this.ctx?.resume();
+    });
   }
 
   toggleMuted(): boolean {
@@ -157,7 +170,13 @@ export class AudioEngine {
       void this.ctx.resume();
       return;
     }
-    const ctx = new AudioContext();
+    // Older iOS Safari exposes only the webkit-prefixed constructor; without
+    // this fallback `new AudioContext()` throws and audio silently never starts.
+    const Ctor: typeof AudioContext | undefined =
+      globalThis.AudioContext ??
+      (globalThis as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
     void ctx.resume();
     this.ctx = ctx;
     this.lastTime = ctx.currentTime;
