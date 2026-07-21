@@ -105,6 +105,51 @@ describe("worldgen", () => {
   });
 });
 
+describe("coherent worldgen", () => {
+  // Fraction of a tile-type's orthogonal neighbours that share its type.
+  const neighbourSameRate = (w: World, tile: TileId): { rate: number; cells: number } => {
+    let cells = 0;
+    let same = 0;
+    let n = 0;
+    for (let y = SURFACE; y < w.height; y++) {
+      for (let x = 1; x < w.width - 1; x++) {
+        if (w.getTile(x, y) !== tile) continue;
+        cells++;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          n++;
+          if (w.getTile(x + dx, y + dy) === tile) same++;
+        }
+      }
+    }
+    return { rate: n ? same / n : 0, cells };
+  };
+
+  it("clusters ore into veins instead of scattering it as speckle", () => {
+    const w = makeWorld();
+    let globalIron = 0;
+    for (const id of w.tiles) if (id === TileId.Ironium) globalIron++;
+    const areaFraction = globalIron / w.tiles.length;
+    const { rate, cells } = neighbourSameRate(w, TileId.Ironium);
+    expect(cells).toBeGreaterThan(50);
+    // A neighbour is far more likely to be ore than the global rate would give
+    // if placement were independent — that difference is the vein.
+    expect(rate).toBeGreaterThan(areaFraction * 4);
+  });
+
+  it("never generates a fully undiggable row (descent is always possible)", () => {
+    // An undiggable band spanning the whole interior width would soft-lock the
+    // descent, so every interior row must keep at least one diggable tile.
+    for (const seed of [1, 42, 2024]) {
+      const w = makeWorld(seed);
+      for (let y = SURFACE; y < w.height - 1; y++) {
+        let diggable = 0;
+        for (let x = 1; x < w.width - 1; x++) if (w.isDiggable(x, y)) diggable++;
+        expect(diggable, `row ${y} (seed ${seed}) is fully blocked`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe("digging tiles", () => {
   it("removes a diggable tile and returns its type", () => {
     const w = makeWorld();
