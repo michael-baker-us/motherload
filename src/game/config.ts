@@ -30,6 +30,30 @@ export const POD = {
   height: 24,
 };
 
+/**
+ * Coherent worldgen. Ore and rock keep the average spawn density that the
+ * chance curves in tiles.ts define, but placement is biased toward high values
+ * of a smooth noise field so it clusters into veins and masses instead of
+ * salt-and-pepper speckle. `sharp` controls contrast (higher = tighter, richer
+ * veins with emptier gaps); `cap` limits how dense a single hotspot can get.
+ */
+export const WORLDGEN = {
+  // Ore is masked to vein regions where a smooth field crosses a threshold, so
+  // it forms bodies you mine out rather than pervasive speckle. The target vein
+  // *area* per mineral is its spawn chance / mean-fill, so overall balance is
+  // roughly preserved; within a vein the fill feathers from edge to dense core.
+  veinFreq: 0.12, // vein-field frequency (~8-tile structures)
+  veinFillMin: 0.3, // fill chance at a vein's feathered edge
+  veinFillMax: 0.96, // fill chance at a vein's core
+  veinAreaScale: 1, // global multiplier on vein area (density knob)
+  // Rock is undiggable, so it's kept deliberately near-speckle — coherent rock
+  // masses risk an impassable full-width band. Real rock/cave structure (with
+  // guaranteed vertical passages) belongs to the caves pass.
+  rockFreq: 0.16,
+  rockSharp: 3,
+  rockCap: 3,
+};
+
 export const DRILL = {
   // Multiplier on dig speed; tile hardness is seconds-to-dig at power 1.
   basePower: 1,
