@@ -90,6 +90,20 @@ describe("parseSave validation", () => {
     expect(parseSave(JSON.stringify({ version: 1, seed: "nope" }))).toBeNull();
   });
 
+  it("passes a current-version save through migration unchanged", () => {
+    const world = makeWorld();
+    const data = captureSave(world, createPlayer(world), 250, createUpgradeState());
+    const parsed = parseSave(JSON.stringify(data));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.version).toBe(1);
+    expect(parsed!.money).toBe(250);
+  });
+
+  it("discards a save from a newer build instead of misreading it", () => {
+    // version > current: can't safely downgrade, so it's left for that build.
+    expect(parseSave(JSON.stringify({ version: 99, seed: 1 }))).toBeNull();
+  });
+
   it("clamps out-of-range upgrade tiers instead of crashing", () => {
     const world = makeWorld();
     const data = captureSave(world, createPlayer(world), 0, createUpgradeState());

@@ -6,6 +6,30 @@ import { UPGRADES, type UpgradeState, type UpgradeTrack } from "./upgrades";
 import type { World } from "./world";
 
 export const SAVE_KEY = "motherload-save";
+export const CURRENT_SAVE_VERSION = 1;
+
+/**
+ * Forward migrations keyed by the version they upgrade FROM. When the save
+ * format changes, bump CURRENT_SAVE_VERSION and add a step here — old saves are
+ * upgraded on load instead of being silently wiped. Example for a future v2:
+ *   1: (d) => ({ ...d, version: 2, newField: defaultValue }),
+ */
+const MIGRATIONS: Record<number, (d: Record<string, unknown>) => Record<string, unknown>> = {};
+
+/** Bring a parsed save of any known older version up to current, or null. */
+function migrate(data: Record<string, unknown>): Record<string, unknown> | null {
+  let version = typeof data.version === "number" ? data.version : 0;
+  // A save written by a newer build than this one can't be understood — leave
+  // it untouched (return null) rather than corrupt it by guessing.
+  if (version > CURRENT_SAVE_VERSION) return null;
+  while (version < CURRENT_SAVE_VERSION) {
+    const step = MIGRATIONS[version];
+    if (!step) return null; // no upgrade path — discard beats loading garbage
+    data = step(data);
+    version = typeof data.version === "number" ? data.version : version + 1;
+  }
+  return data;
+}
 
 /**
  * Minimal storage interface so the save system tests with a plain object and
@@ -42,7 +66,7 @@ export function captureSave(
   upgrades: UpgradeState,
 ): SaveData {
   return {
-    version: 1,
+    version: CURRENT_SAVE_VERSION,
     seed: world.seed,
     tiles: [...world.changes.entries()],
     player: {
@@ -58,11 +82,15 @@ export function captureSave(
   };
 }
 
-/** Parse and validate a save. Returns null for anything malformed — a bad save must never crash the game. */
+/** Parse, migrate, and validate a save. Returns null for anything malformed or unmigratable — a bad save must never crash the game. */
 export function parseSave(json: string): SaveData | null {
   try {
-    const data = JSON.parse(json) as SaveData;
-    if (data?.version !== 1) return null;
+    const raw = JSON.parse(json) as unknown;
+    if (typeof raw !== "object" || raw === null) return null;
+    const migrated = migrate(raw as Record<string, unknown>);
+    if (!migrated) return null;
+    const data = migrated as unknown as SaveData;
+    if (data.version !== CURRENT_SAVE_VERSION) return null;
     if (typeof data.seed !== "number" || !Array.isArray(data.tiles)) return null;
     if (typeof data.money !== "number") return null;
     const p = data.player;

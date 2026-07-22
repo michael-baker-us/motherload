@@ -31,6 +31,16 @@ export class Loop {
     cancelAnimationFrame(this.rafId);
   }
 
+  /**
+   * Drop accumulated time and re-anchor to now — call when returning from a
+   * long pause (tab hidden) so the sim resumes seamlessly instead of
+   * fast-forwarding a MAX_FRAME catch-up burst.
+   */
+  reset(): void {
+    this.last = performance.now();
+    this.accumulator = 0;
+  }
+
   private frame = (now: number): void => {
     if (!this.running) return;
     const delta = Math.min((now - this.last) / 1000, MAX_FRAME);

@@ -5,6 +5,7 @@ import { Input } from "./engine/input";
 import { Game } from "./game/game";
 import { loadViewPrefs } from "./render/prefs";
 import { Renderer } from "./render/renderer";
+import { showCrashScreen } from "./ui/crash";
 import { TouchControls } from "./ui/touchControls";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
@@ -44,15 +45,35 @@ function resize(): void {
 window.addEventListener("resize", resize);
 resize();
 
-new Loop({
+const loop = new Loop({
   update(dt) {
-    game.update(dt, input);
-    input.endFrame();
+    try {
+      game.update(dt, input);
+      input.endFrame();
+    } catch (e) {
+      showCrashScreen(e);
+    }
   },
   render(alpha) {
-    // Audio reads fxEvents before the renderer drains them.
-    audio.frame(game);
-    renderer.render(ctx!, game, alpha);
-    touchControls.sync(game);
+    try {
+      // Audio reads fxEvents before the renderer drains them.
+      audio.frame(game);
+      renderer.render(ctx!, game, alpha);
+      touchControls.sync(game);
+    } catch (e) {
+      showCrashScreen(e);
+    }
   },
-}).start();
+});
+
+// Re-anchor the clock when the tab becomes visible so the sim doesn't
+// fast-forward a catch-up burst after being backgrounded.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") loop.reset();
+});
+
+// Last-resort boundary for anything thrown outside the loop (event handlers).
+window.addEventListener("error", (e) => showCrashScreen(e.error ?? e.message));
+window.addEventListener("unhandledrejection", (e) => showCrashScreen(e.reason));
+
+loop.start();
