@@ -2,7 +2,7 @@ import { Camera } from "../engine/camera";
 import type { Input } from "../engine/input";
 import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
-import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
+import { DRILL, ECONOMY, FUEL, HULL, SLICE, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
 import { addToCargo, cargoUnits, cargoValue, refuelPlan, salvageFeeFor } from "./economy";
 import { Onboarding, type OnboardPrompt } from "./onboarding";
@@ -27,7 +27,7 @@ import {
   type SaveStorage,
 } from "./save";
 import { stationInSpan, type Station } from "./stations";
-import { TILE_DEFS } from "./tiles";
+import { TILE_DEFS, TileId } from "./tiles";
 import {
   createUpgradeState,
   currentTier,
@@ -37,7 +37,7 @@ import {
 } from "./upgrades";
 import { World } from "./world";
 
-export type GameState = "title" | "playing" | "shop" | "menu" | "dead";
+export type GameState = "title" | "playing" | "shop" | "menu" | "dead" | "won";
 
 /**
  * One-shot game events (world coordinates). The audio engine reads the queue
@@ -81,6 +81,11 @@ export class Game {
   onboarding: Onboarding | null = null;
   /** Set the first time cargo is sold — the onboarding's final beat. */
   soldCargo = false;
+  // Vertical-slice objective: reach the anomaly depth. Stats feed the payoff.
+  goalReached = false;
+  runTime = 0;
+  deaths = 0;
+  maxDepth = 0;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
   fuse: { x: number; y: number; timeLeft: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
@@ -135,6 +140,10 @@ export class Game {
   startNewGame(): void {
     this.state = "playing";
     this.onboarding = new Onboarding();
+    this.goalReached = false;
+    this.runTime = 0;
+    this.deaths = 0;
+    this.maxDepth = 0;
     this.saveNow();
   }
 
@@ -151,6 +160,8 @@ export class Game {
     applyPlayerSave(pod, data);
     this.player = pod;
     this.state = "playing";
+    // Returning players skip the first-descent objective, like the tutorial.
+    this.goalReached = true;
     return true;
   }
 
@@ -188,6 +199,11 @@ export class Game {
       if (input.wasPressed("Enter", "Space")) this.respawn();
       return;
     }
+    if (this.state === "won") {
+      // The payoff isn't a dead end — carry on into the endless world.
+      if (input.wasPressed("Enter", "Space")) this.state = "playing";
+      return;
+    }
     if (this.justClosedShop) {
       // Keys pressed inside the overlay must not leak into the sim.
       input.reset();
@@ -205,6 +221,7 @@ export class Game {
     }
 
     const p = this.player;
+    this.runTime += dt;
     if (this.cheats.unlimitedFuel) p.fuel = p.maxFuel;
     if (this.cheats.unlimitedFunds && this.money < DEV_MONEY) this.money = DEV_MONEY;
 
@@ -283,6 +300,12 @@ export class Game {
       cargoUnits: cargoUnits(p.cargo),
       soldCargo: this.soldCargo,
     });
+
+    this.maxDepth = Math.max(this.maxDepth, this.depth);
+    if (!this.goalReached && this.depth >= SLICE.goalDepth) {
+      this.reachAnomaly();
+      return;
+    }
 
     const station = this.currentStation();
     if (station && input.wasPressed("Enter", "KeyE")) {
@@ -452,6 +475,51 @@ export class Game {
     return this.onboarding?.prompt ?? null;
   }
 
+  /** Live objective for the HUD while the goal is pending; null otherwise. */
+  objective(): { current: number; target: number } | null {
+    if (this.state !== "playing" || this.goalReached) return null;
+    if (this.onboarding?.active) return null; // don't fight the tutorial banner
+    return { current: this.depth, target: SLICE.goalDepth };
+  }
+
+  /** Final run stats for the payoff screen. */
+  runStats(): { depth: number; money: number; time: number; deaths: number } {
+    return { depth: this.maxDepth, money: this.money, time: this.runTime, deaths: this.deaths };
+  }
+
+  /** Goal reached: freeze into the payoff screen (Enter resumes exploring). */
+  private reachAnomaly(): void {
+    this.goalReached = true;
+    this.state = "won";
+    const p = this.player;
+    this.pushFx({ kind: "upgrade", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+    this.saveNow();
+  }
+
+  /**
+   * Dev/test: drop the pod at the objective depth so the payoff can be tried
+   * without the full descent. Carves a landing pocket and re-arms the goal so
+   * it can be triggered again. The next tick's depth check fires the payoff.
+   */
+  devWarpToGoal(): void {
+    const col = Math.floor(this.world.width / 2);
+    const row = this.world.surfaceRow + SLICE.goalDepth;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -1; dx <= 1; dx++) this.world.setTile(col + dx, row + dy, TileId.Empty);
+    }
+    this.world.setTile(col, row + 2, TileId.Dirt); // a floor to settle onto
+    const p = this.player;
+    p.x = col * TILE + (TILE - p.width) / 2;
+    p.y = row * TILE;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.hasDigTarget = false;
+    p.digProgress = 0;
+    this.goalReached = false; // re-arm so the payoff triggers on arrival
+  }
+
   /** Repair as much hull as money covers, at HULL.repairPricePerHp. */
   repairHull(): boolean {
     const p = this.player;
@@ -478,6 +546,7 @@ export class Game {
   die(cause: string): void {
     this.state = "dead";
     this.deathCause = cause;
+    this.deaths += 1;
     this.fuse = null;
     this.pushFx({
       kind: "death",

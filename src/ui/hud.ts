@@ -13,6 +13,8 @@ export interface HudData {
   hint: string | null;
   /** First-run guided objective, centered near the top; null when done. */
   onboarding: { text: string; step: number; total: number } | null;
+  /** Vertical-slice objective progress banner; null when there's no goal. */
+  objective: { current: number; target: number } | null;
   /** Transient message; total lets the HUD animate the slide-in. */
   toast: { text: string; timeLeft: number; total: number } | null;
   /** Dev cheats active — progress is not being saved. */
@@ -165,6 +167,44 @@ export class Hud {
       ctx.fillStyle = "#ffffff";
       ctx.font = `bold 14px ${MONO}`;
       ctx.fillText(o.text, cardX + 20, cardY + 25);
+    }
+
+    // Vertical-slice objective banner with a depth progress bar.
+    if (data.objective) {
+      const o = data.objective;
+      const label = "◈ REACH THE ANOMALY";
+      const prog = `${Math.min(o.current, o.target)} / ${o.target} m`;
+      ctx.font = `bold 12px ${MONO}`;
+      const cardW = Math.max(ctx.measureText(label).width + ctx.measureText(prog).width + 60, 300);
+      const cardX = Math.round((viewW - cardW) / 2);
+      const cardY = Math.round(viewH * 0.13);
+      ctx.fillStyle = "rgba(10,12,16,0.82)";
+      ctx.beginPath();
+      ctx.roundRect(cardX, cardY, cardW, 42, 12);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(140,200,255,0.4)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "#8ec8ff";
+      ctx.fillText(label, cardX + 18, cardY + 9);
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.textAlign = "right";
+      ctx.fillText(prog, cardX + cardW - 18, cardY + 9);
+      ctx.textAlign = "left";
+      // progress track + fill
+      const barX = cardX + 18;
+      const barW = cardW - 36;
+      const frac = clamp(o.current / o.target, 0, 1);
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.beginPath();
+      ctx.roundRect(barX, cardY + 28, barW, 6, 3);
+      ctx.fill();
+      if (frac > 0.01) {
+        ctx.fillStyle = "#6fb7ff";
+        ctx.beginPath();
+        ctx.roundRect(barX, cardY + 28, barW * frac, 6, 3);
+        ctx.fill();
+      }
     }
 
     // Toast: slides down and fades out.

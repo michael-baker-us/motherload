@@ -204,6 +204,7 @@ export class Renderer {
         cargoCapacity: p.cargoCapacity,
         hint: game.stationHint(),
         onboarding: game.onboardingHint(),
+        objective: game.objective(),
         toast: game.toast,
         dev: game.devMode,
         items: ITEM_ORDER.map((id, i) => ({
@@ -215,6 +216,7 @@ export class Renderer {
       dt,
     );
     if (game.state === "dead") this.drawDeathScreen(ctx, game, this.deathT);
+    if (game.state === "won") this.drawWinScreen(ctx, game);
 
     // Arrival fade, over everything including the HUD.
     if (this.fade > 0) {
@@ -1153,6 +1155,44 @@ export class Renderer {
     ctx.fillStyle = "#ffe97a";
     center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 106);
     ctx.globalAlpha = 1;
+    ctx.font = "14px monospace";
+  }
+
+  private drawWinScreen(ctx: CanvasRenderingContext2D, game: Game): void {
+    const vw = ctx.canvas.clientWidth;
+    const vh = ctx.canvas.clientHeight;
+    const s = game.runStats();
+    const secs = Math.floor(s.time % 60)
+      .toString()
+      .padStart(2, "0");
+    const time = `${Math.floor(s.time / 60)}:${secs}`;
+
+    ctx.fillStyle = "rgba(4,8,16,0.8)";
+    ctx.fillRect(0, 0, vw, vh);
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(142,200,255,0.8)";
+    ctx.font = "bold 12px monospace";
+    center(ctx, "◈ DEMO COMPLETE", vw, vh * 0.3);
+    ctx.fillStyle = "#8ec8ff";
+    ctx.font = "bold 32px monospace";
+    center(ctx, "ANOMALY REACHED", vw, vh * 0.3 + 24);
+    ctx.fillStyle = "#d8e6ff";
+    ctx.font = "15px monospace";
+    center(ctx, "You've reached the signal at the bottom of the world.", vw, vh * 0.3 + 70);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "15px monospace";
+    const stats = [
+      `Depth reached    ${s.depth} m`,
+      `Minerals banked  $${s.money.toLocaleString()}`,
+      `Time             ${time}`,
+      `Pods lost        ${s.deaths}`,
+    ];
+    stats.forEach((line, i) => center(ctx, line, vw, vh * 0.3 + 108 + i * 26));
+
+    ctx.fillStyle = "#ffe97a";
+    ctx.font = "16px monospace";
+    center(ctx, "[Enter] keep exploring", vw, vh * 0.3 + 108 + stats.length * 26 + 24);
     ctx.font = "14px monospace";
   }
 }

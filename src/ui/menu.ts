@@ -118,6 +118,12 @@ export class MenuOverlay {
       game.devMode ? "#ffb060" : "#888",
     );
 
+    // Test shortcut: jump straight to the objective depth to try the payoff.
+    this.button("◈ Warp to anomaly depth (dev)", "#3a5a9a", () => {
+      game.devWarpToGoal();
+      this.close(); // resume so the arrival + payoff play out
+    });
+
     this.button("Resume", "#3d5a80", () => this.close());
   }
 

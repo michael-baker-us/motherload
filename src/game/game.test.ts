@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Input } from "../engine/input";
-import { ECONOMY, FUEL, TILE } from "./config";
+import { ECONOMY, FUEL, SLICE, TILE } from "./config";
 import { Game } from "./game";
 import { FUEL_CELL_UNITS, ITEMS, REPAIR_KIT_HP } from "./items";
 import { spawnPoint } from "./player";
@@ -421,5 +421,52 @@ describe("game state machine", () => {
     game.player.prevX = game.player.x;
     game.update(DT, idleInput);
     expect(game.currentStation()?.id).toBe("fuel");
+  });
+});
+
+describe("vertical-slice objective", () => {
+  // A carved pocket just past the goal depth, deep enough to trip the payoff.
+  const goalRow = (game: Game): number => game.world.surfaceRow + SLICE.goalDepth + 5;
+
+  it("shows the objective while the goal is pending", () => {
+    const game = makeGame();
+    expect(game.objective()).not.toBeNull();
+    expect(game.objective()?.target).toBe(SLICE.goalDepth);
+  });
+
+  it("triggers the payoff when the goal depth is reached", () => {
+    const game = makeGame();
+    placeInPocket(game, 20, goalRow(game)); // its settling update trips the win
+    expect(game.state).toBe("won");
+    expect(game.goalReached).toBe(true);
+    expect(game.objective()).toBeNull();
+    expect(game.runStats().depth).toBeGreaterThanOrEqual(SLICE.goalDepth);
+  });
+
+  it("resumes exploring on Enter and never re-triggers", () => {
+    const game = makeGame();
+    placeInPocket(game, 20, goalRow(game));
+    expect(game.state).toBe("won");
+    game.update(DT, keysPressed("Enter"));
+    expect(game.state).toBe("playing");
+    game.update(DT, idleInput); // still deep, but the goal is already claimed
+    expect(game.state).toBe("playing");
+  });
+
+  it("counts pods lost for the payoff stats", () => {
+    const game = makeGame();
+    expect(game.runStats().deaths).toBe(0);
+    game.die("test");
+    expect(game.runStats().deaths).toBe(1);
+  });
+
+  it("dev warp drops the pod at the goal and triggers the payoff", () => {
+    const game = makeGame();
+    game.goalReached = true; // pretend it was already claimed
+    game.devWarpToGoal();
+    expect(game.goalReached).toBe(false); // re-armed for testing
+    for (let i = 0; i < 5 && game.state === "playing"; i++) game.update(DT, idleInput);
+    expect(game.state).toBe("won");
+    expect(game.runStats().depth).toBeGreaterThanOrEqual(SLICE.goalDepth);
   });
 });

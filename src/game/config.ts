@@ -15,6 +15,11 @@ export const WORLD = {
   surfaceRow: 6, // first solid row; everything above is sky
 };
 
+/** Vertical-slice demo objective. Depth is in metres (= tiles below surface). */
+export const SLICE = {
+  goalDepth: 300, // reach this depth to trigger the "anomaly reached" payoff (tuned in the balance pass)
+};
+
 export const PHYSICS = {
   gravity: 1100,
   thrust: 2200, // upward accel while thrusting (must beat gravity)
