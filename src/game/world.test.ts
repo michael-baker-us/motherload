@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SLICE } from "./config";
 import { STATIONS } from "./stations";
 import { MINERAL_BANDS, TileId } from "./tiles";
 import { World } from "./world";
@@ -150,6 +151,20 @@ describe("coherent worldgen", () => {
         expect(open, `row ${y} (seed ${seed}) is fully blocked`).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("stamps the authored anomaly set-piece at the goal depth", () => {
+    const w = makeWorld();
+    expect(w.anomaly).not.toBeNull();
+    const { x, y } = w.anomaly!;
+    expect(w.getTile(x, y)).toBe(TileId.Anomaly);
+    expect(y - SURFACE).toBe(SLICE.goalDepth);
+    // A chamber is carved around the beacon...
+    expect(w.getTile(x - 3, y)).toBe(TileId.Empty);
+    expect(w.getTile(x + 3, y)).toBe(TileId.Empty);
+    // ...on a floor, and the beacon itself is an undiggable landmark.
+    expect(w.getTile(x, y + 1)).toBe(TileId.Dirt);
+    expect(w.isDiggable(x, y)).toBe(false);
   });
 
   it("carves open caverns that grow more common with depth", () => {

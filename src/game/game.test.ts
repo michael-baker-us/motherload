@@ -465,7 +465,8 @@ describe("vertical-slice objective", () => {
     game.goalReached = true; // pretend it was already claimed
     game.devWarpToGoal();
     expect(game.goalReached).toBe(false); // re-armed for testing
-    for (let i = 0; i < 5 && game.state === "playing"; i++) game.update(DT, idleInput);
+    // The warp drops the pod into the chamber; let it fall to the goal depth.
+    for (let i = 0; i < 120 && game.state === "playing"; i++) game.update(DT, idleInput);
     expect(game.state).toBe("won");
     expect(game.runStats().depth).toBeGreaterThanOrEqual(SLICE.goalDepth);
   });

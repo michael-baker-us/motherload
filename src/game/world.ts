@@ -1,5 +1,5 @@
 import { clamp } from "../engine/math";
-import { WORLDGEN } from "./config";
+import { SLICE, WORLDGEN } from "./config";
 import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { fbm2d, fieldMeanPow, fieldSamples, tailThreshold } from "./noise";
 import { hash2d } from "./rng";
@@ -27,6 +27,8 @@ export class World {
   readonly pixelHeight: number;
   /** Every tile changed since generation (flat index → tile) — the save system's diff. */
   readonly changes = new Map<number, TileId>();
+  /** The authored objective set-piece location (tile coords), for lighting/HUD. */
+  anomaly: { x: number; y: number } | null = null;
 
   // Seeds and normalisers for coherent placement, all derived from `seed`.
   private readonly rockFieldSeed: number;
@@ -80,6 +82,33 @@ export class World {
         this.tiles[y * this.width + x] = TileId.Rock;
       }
     }
+    this.stampAnomaly();
+  }
+
+  /**
+   * The authored objective set-piece: a wide crafted cavern at the goal depth
+   * with a glowing anomaly beacon at its centre, so reaching the objective
+   * always drops the pod into a hand-made chamber rather than random terrain.
+   * Written directly (not via setTile) so it's part of generation.
+   */
+  private stampAnomaly(): void {
+    const anomRow = this.surfaceRow + SLICE.goalDepth;
+    if (anomRow + 1 >= this.height) return; // world too shallow (test dimensions)
+    const centerX = Math.floor(this.width / 2);
+    const roofRow = anomRow - 4;
+    const set = (x: number, y: number, t: TileId): void => {
+      if (x > 0 && x < this.width - 1 && y >= 0 && y < this.height) this.tiles[y * this.width + x] = t;
+    };
+    // Carve the chamber, leaving the columns beside the bedrock border as walls.
+    for (let y = roofRow; y <= anomRow; y++) {
+      for (let x = 2; x < this.width - 2; x++) set(x, y, TileId.Empty);
+    }
+    // A diggable dirt floor so the pod lands and the row stays passable.
+    for (let x = 2; x < this.width - 2; x++) set(x, anomRow + 1, TileId.Dirt);
+    // A two-tile crystal beacon rising from the floor at the centre.
+    set(centerX, anomRow, TileId.Anomaly);
+    set(centerX, anomRow - 1, TileId.Anomaly);
+    this.anomaly = { x: centerX, y: anomRow };
   }
 
   /**

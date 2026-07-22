@@ -13,6 +13,7 @@ export enum TileId {
   Diamond,
   GasPocket, // renders exactly like dirt — a hidden trap that explodes when dug
   Lava, // visible hazard; drilling through it burns the hull
+  Anomaly, // the vertical-slice objective: a glowing beacon in a crafted cavern
 }
 
 export interface TileDef {
@@ -40,6 +41,8 @@ export const TILE_DEFS: Record<TileId, TileDef> = {
   [TileId.Diamond]: { name: "diamond", color: "#8ef0e8", solid: true, hardness: 1.0, value: 2000, cargoUnits: 1 },
   [TileId.GasPocket]: { name: "gas pocket", color: "#95502b", solid: true, hardness: 0.25, value: 0, cargoUnits: 0 },
   [TileId.Lava]: { name: "lava", color: "#ff5a1f", solid: true, hardness: 0.3, value: 0, cargoUnits: 0 },
+  // Undiggable landmark — a permanent beacon, drawn specially by the renderer.
+  [TileId.Anomaly]: { name: "anomaly", color: "#9ff0ff", solid: true, hardness: null, value: 0, cargoUnits: 0 },
 };
 
 /**

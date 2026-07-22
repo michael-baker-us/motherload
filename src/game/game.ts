@@ -502,12 +502,17 @@ export class Game {
    * it can be triggered again. The next tick's depth check fires the payoff.
    */
   devWarpToGoal(): void {
-    const col = Math.floor(this.world.width / 2);
-    const row = this.world.surfaceRow + SLICE.goalDepth;
-    for (let dy = -2; dy <= 2; dy++) {
-      for (let dx = -1; dx <= 1; dx++) this.world.setTile(col + dx, row + dy, TileId.Empty);
+    const anom = this.world.anomaly;
+    // Drop into the crafted chamber beside the beacon. If there's no set-piece
+    // (e.g. a shallow test world), carve a small landing pocket instead.
+    const col = anom ? Math.max(2, anom.x - 3) : Math.floor(this.world.width / 2);
+    const row = anom ? anom.y - 2 : this.world.surfaceRow + SLICE.goalDepth;
+    if (!anom) {
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -1; dx <= 1; dx++) this.world.setTile(col + dx, row + dy, TileId.Empty);
+      }
+      this.world.setTile(col, row + 3, TileId.Dirt);
     }
-    this.world.setTile(col, row + 2, TileId.Dirt); // a floor to settle onto
     const p = this.player;
     p.x = col * TILE + (TILE - p.width) / 2;
     p.y = row * TILE;

@@ -58,6 +58,7 @@ export class Renderer {
   private readonly crust = bakeCrust();
   private readonly lavaGlow = bakeGlow(96, 255, 120, 30);
   private readonly warmGlow = bakeGlow(48, 255, 210, 130);
+  private readonly anomalyGlow = bakeGlow(128, 120, 235, 255);
   private readonly motes: { ox: number; oy: number; phase: number }[] = [];
 
   private particles: Particle[] = [];
@@ -347,6 +348,42 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /** The objective beacon: a pulsing faceted crystal with an additive halo. */
+  private drawAnomaly(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
+    const cx = sx + TILE / 2;
+    const cy = sy + TILE / 2;
+    const pulse = 0.6 + 0.4 * Math.sin(this.time * 2.2);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.5 + pulse * 0.4;
+    ctx.drawImage(this.anomalyGlow, cx - 64, cy - 64);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    const h = 13;
+    const w = 9;
+    ctx.fillStyle = "#bff6ff";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - h);
+    ctx.lineTo(cx + w, cy);
+    ctx.lineTo(cx, cy + h);
+    ctx.lineTo(cx - w, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#5fd6ff";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - h);
+    ctx.lineTo(cx + w, cy);
+    ctx.lineTo(cx, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = `rgba(255,255,255,${(0.4 + pulse * 0.5).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 1, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
   // --- World ---------------------------------------------------------------
 
   private drawTiles(ctx: CanvasRenderingContext2D, game: Game): void {
@@ -366,6 +403,11 @@ export class Renderer {
         if (tile === TileId.Empty && viewPrefs.depth) continue; // cavity drawn by the depth pass
         const sx = tx * TILE - cam.x;
         const sy = ty * TILE - cam.y;
+
+        if (tile === TileId.Anomaly) {
+          this.drawAnomaly(ctx, sx, sy);
+          continue;
+        }
 
         const variants = this.textures.get(tile);
         if (variants) {
@@ -1041,6 +1083,27 @@ export class Renderer {
     lctx.fillStyle = grad;
     lctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
 
+    // The anomaly lights its own chamber — a second hole in the darkness.
+    const anom = game.world.anomaly;
+    let ax = 0;
+    let ay = 0;
+    let ar = 0;
+    let anomLit = false;
+    if (anom) {
+      ax = (anom.x * TILE + TILE / 2 - cam.x) * ZOOM;
+      ay = (anom.y * TILE + TILE / 2 - cam.y) * ZOOM;
+      ar = radius * (0.85 + 0.15 * Math.sin(this.time * 2));
+      if (ax > -ar && ax < screenW + ar && ay > -ar && ay < screenH + ar) {
+        anomLit = true;
+        const ag = lctx.createRadialGradient(ax, ay, 16, ax, ay, ar);
+        ag.addColorStop(0, "rgba(0,0,0,0.92)");
+        ag.addColorStop(0.6, "rgba(0,0,0,0.55)");
+        ag.addColorStop(1, "rgba(0,0,0,0)");
+        lctx.fillStyle = ag;
+        lctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
+      }
+    }
+
     ctx.drawImage(lc, 0, 0);
 
     // Warm tint inside the halo so the light feels like a lamp, not a hole.
@@ -1049,6 +1112,15 @@ export class Renderer {
     warm.addColorStop(1, "rgba(255,190,110,0)");
     ctx.fillStyle = warm;
     ctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
+
+    // Cool cyan wash from the beacon.
+    if (anomLit) {
+      const cool = ctx.createRadialGradient(ax, ay, 8, ax, ay, ar * 0.6);
+      cool.addColorStop(0, `rgba(120,230,255,${(0.16 * this.darkness).toFixed(3)})`);
+      cool.addColorStop(1, "rgba(120,230,255,0)");
+      ctx.fillStyle = cool;
+      ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
+    }
   }
 
   /** Slow dust motes drifting through the headlight beam. */
