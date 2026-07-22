@@ -6,6 +6,8 @@
  * into `out`. Envelopes use exponential decay to 0.001, which reads as silence.
  */
 
+import { digClass, type TileId } from "../game/tiles";
+
 const noiseBuffers = new WeakMap<BaseAudioContext, AudioBuffer>();
 
 /** One second of white noise, cached per context; loops and one-shots share it. */
@@ -75,17 +77,48 @@ function noiseHit(ctx: BaseAudioContext, out: AudioNode, o: NoiseOpts): void {
   src.onended = () => g.disconnect();
 }
 
-/** Dirt crunch: filtered noise chunk plus a low thud. */
-export function playDug(ctx: BaseAudioContext, out: AudioNode): void {
-  noiseHit(ctx, out, {
-    filter: "lowpass",
-    freqFrom: 1200,
-    freqTo: 250,
-    gain: 0.4,
-    duration: 0.16,
-    playbackRate: 0.7 + Math.random() * 0.4,
-  });
-  tone(ctx, out, { type: "sine", freqFrom: 95, freqTo: 55, gain: 0.3, duration: 0.12 });
+/**
+ * Break sound, varied by the material's dig class so each stratum feels
+ * different: soft dirt crumble → sharper stone crack → ringing granite chip.
+ */
+export function playDug(ctx: BaseAudioContext, out: AudioNode, tile?: TileId): void {
+  const cls = tile === undefined ? "soft" : digClass(tile);
+  if (cls === "soft") {
+    // Dirt: dull lowpassed crumble + a soft thud.
+    noiseHit(ctx, out, {
+      filter: "lowpass",
+      freqFrom: 1200,
+      freqTo: 250,
+      gain: 0.4,
+      duration: 0.16,
+      playbackRate: 0.7 + Math.random() * 0.4,
+    });
+    tone(ctx, out, { type: "sine", freqFrom: 95, freqTo: 55, gain: 0.3, duration: 0.12 });
+  } else if (cls === "mid") {
+    // Stone: a brighter, tighter crack with a woody click.
+    noiseHit(ctx, out, {
+      filter: "bandpass",
+      freqFrom: 1150,
+      freqTo: 650,
+      gain: 0.42,
+      duration: 0.12,
+      playbackRate: 0.9 + Math.random() * 0.3,
+    });
+    tone(ctx, out, { type: "triangle", freqFrom: 240, freqTo: 90, gain: 0.2, duration: 0.09 });
+    tone(ctx, out, { type: "sine", freqFrom: 72, freqTo: 46, gain: 0.26, duration: 0.12 });
+  } else {
+    // Granite / hard ore: a sharp high chip that rings, over a low body.
+    noiseHit(ctx, out, {
+      filter: "highpass",
+      freqFrom: 2600,
+      freqTo: 1500,
+      gain: 0.3,
+      duration: 0.09,
+      playbackRate: 1 + Math.random() * 0.4,
+    });
+    tone(ctx, out, { type: "triangle", freqFrom: 1500, freqTo: 940, gain: 0.13, duration: 0.08 });
+    tone(ctx, out, { type: "sine", freqFrom: 82, freqTo: 50, gain: 0.3, duration: 0.14 });
+  }
 }
 
 /** Mineral banked: quick two-note blip rising. */

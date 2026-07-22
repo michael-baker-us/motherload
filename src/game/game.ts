@@ -53,6 +53,8 @@ export interface FxEvent {
   power?: number;
   /** Cash amount for the floating "+$" reward pop (pickup value / sale total). */
   value?: number;
+  /** The tile involved (e.g. what was dug) — drives per-material feedback. */
+  tile?: TileId;
 }
 
 /** Interval between surface autosaves while the pod is parked topside. */
@@ -283,7 +285,7 @@ export class Game {
         this.applyDamage(hazard.damage, hazard.cause);
         if (this.state !== "playing") return;
       } else {
-        this.pushFx({ kind: "dug", x: cx, y: cy, color: TILE_DEFS[dug].color });
+        this.pushFx({ kind: "dug", x: cx, y: cy, color: TILE_DEFS[dug].color, tile: dug });
         if (TILE_DEFS[dug].value > 0) {
           if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
             this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);

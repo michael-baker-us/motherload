@@ -176,7 +176,7 @@ export class AudioEngine {
     this.playedCount++;
     switch (e.kind) {
       case "dug":
-        sfx.playDug(ctx, out);
+        sfx.playDug(ctx, out, e.tile);
         break;
       case "pickup":
         sfx.playPickup(ctx, out);

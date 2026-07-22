@@ -106,6 +106,17 @@ export function hardnessScaleAt(depth: number): number {
   return Math.min(1 + Math.max(0, depth) / DRILL.hardnessDepth, DRILL.hardnessMaxScale);
 }
 
+export type DigClass = "soft" | "mid" | "hard";
+
+/**
+ * Feedback bucket by hardness — drives per-material dig particles and break
+ * sound so dirt, stone, and granite (and soft vs hard ore) each feel different.
+ */
+export function digClass(tile: TileId): DigClass {
+  const h = TILE_DEFS[tile].hardness ?? 0.25;
+  return h < 0.32 ? "soft" : h < 0.55 ? "mid" : "hard";
+}
+
 export function bandChanceAt(band: MineralBand, depth: number): number {
   if (depth < band.minDepth || depth > band.maxDepth) return 0;
   const t = (depth - band.minDepth) / (band.maxDepth - band.minDepth);

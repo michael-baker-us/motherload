@@ -5,7 +5,7 @@ import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
-import { hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
+import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
@@ -263,11 +263,21 @@ export class Renderer {
   private consumeFx(events: FxEvent[]): void {
     for (const e of events) {
       if (e.kind === "dug") {
-        // The tile gives way: debris burst plus a short pop of shake and a
-        // recoil kick so breaking through feels like contact, not a timer.
-        this.burst(e.x, e.y, 13, e.color ?? "#8a4a2a", 120, 700, false);
-        this.burst(e.x, e.y, 4, "#ffd9a0", 70, 400, true); // grit sparks
-        this.shake = Math.max(this.shake, 0.28);
+        // The tile gives way — debris tuned to the material: dirt puffs dust,
+        // stone throws chips, granite cracks off fast bright shards.
+        const color = e.color ?? "#8a4a2a";
+        const cls = e.tile === undefined ? "soft" : digClass(e.tile);
+        if (cls === "soft") {
+          this.burst(e.x, e.y, 12, color, 90, 820, false); // slow, dusty, settles
+          this.burst(e.x, e.y, 3, "#e8c090", 50, 500, true);
+        } else if (cls === "mid") {
+          this.burst(e.x, e.y, 13, color, 135, 700, false); // chunkier chips
+          this.burst(e.x, e.y, 4, "#ffe0b0", 90, 420, true);
+        } else {
+          this.burst(e.x, e.y, 10, color, 175, 640, false); // fewer, faster shards
+          this.burst(e.x, e.y, 8, "#ffffff", 150, 300, true); // bright sparks fly
+        }
+        this.shake = Math.max(this.shake, cls === "hard" ? 0.34 : 0.28);
         this.drillRecoil = 1;
       } else if (e.kind === "impact") {
         this.burst(e.x, e.y, 14, "#a4643c", 130, 300, false);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SLICE } from "./config";
 import { STATIONS } from "./stations";
-import { MINERAL_BANDS, stratumAt, TileId } from "./tiles";
+import { digClass, MINERAL_BANDS, stratumAt, TileId } from "./tiles";
 import { World } from "./world";
 
 const SURFACE = 6;
@@ -204,6 +204,13 @@ describe("material strata", () => {
     expect(countAt(0, 30, TileId.Granite)).toBe(0); // no granite near the surface
     expect(countAt(120, 220, TileId.Stone)).toBeGreaterThan(0); // stone mid-depth
     expect(countAt(400, 600, TileId.Granite)).toBeGreaterThan(0); // granite deep down
+  });
+
+  it("buckets materials into dig-feedback classes by hardness", () => {
+    expect(digClass(TileId.Dirt)).toBe("soft");
+    expect(digClass(TileId.Stone)).toBe("mid");
+    expect(digClass(TileId.Granite)).toBe("hard");
+    expect(digClass(TileId.Diamond)).toBe("hard");
   });
 });
 
