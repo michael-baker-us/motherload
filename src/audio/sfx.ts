@@ -224,6 +224,101 @@ export function buildDrillVoice(ctx: BaseAudioContext, out: AudioNode): DrillVoi
   return { gate, motor, motorFilter, chatterLfo };
 }
 
+export interface PadVoice {
+  /** Overall level, eased by depth in the engine. */
+  gain: GainNode;
+  /** The chord voices — the engine glides these through a progression. */
+  oscs: OscillatorNode[];
+}
+
+/**
+ * A soft ambient music pad: a mid-range A-minor(add9) chord built from pure
+ * sine tones (so it reads as music, not a buzz) through a gently drifting,
+ * non-resonant lowpass, with per-voice vibrato so it breathes. The engine
+ * fades it in with depth. Kept in the mid register so it sits clearly above
+ * the low rumble/wind noise beds instead of muddying with them.
+ */
+export function buildPad(ctx: BaseAudioContext, out: AudioNode): PadVoice {
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 950;
+  filter.Q.value = 0.6; // no resonant peak — that peak is what buzzes
+  filter.connect(gain).connect(out);
+
+  // Slow, gentle cutoff drift gives the pad movement without a melody.
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 0.05;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 300;
+  lfo.connect(lfoGain).connect(filter.frequency);
+  lfo.start();
+
+  // Four sine voices, initialised to A minor; the engine glides them through a
+  // chord progression so the pad evolves instead of sitting on one held chord.
+  const start = [220.0, 261.63, 329.63, 440.0]; // A3 · C4 · E4 · A4
+  const levels = [0.32, 0.24, 0.2, 0.1];
+  const oscs: OscillatorNode[] = [];
+  start.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = i === 3 ? "triangle" : "sine";
+    osc.frequency.value = f;
+    osc.detune.value = (i - 1.5) * 3; // slight spread so it's not sterile
+    const og = ctx.createGain();
+    og.gain.value = levels[i]!;
+    osc.connect(og).connect(filter);
+    osc.start();
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 0.1 + i * 0.03;
+    const vibG = ctx.createGain();
+    vibG.gain.value = 2;
+    vib.connect(vibG).connect(osc.detune);
+    vib.start();
+    oscs.push(osc);
+  });
+
+  return { gain, oscs };
+}
+
+/** A soft, bell-like melodic note over the pad — the sparse ambient melody. */
+export function playPadNote(ctx: BaseAudioContext, out: AudioNode, freq: number): void {
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.06, t0 + 0.04); // gentle attack
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.8); // long bell tail
+  osc.connect(g).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + 1.9);
+  osc.onended = () => g.disconnect();
+}
+
+/** The payoff: a triumphant rising arpeggio, high shimmer, and a warm swell. */
+export function playAnomalyStinger(ctx: BaseAudioContext, out: AudioNode): void {
+  const notes = [392, 523, 659, 784, 1047]; // G4 · C5 · E5 · G5 · C6
+  notes.forEach((f, i) => {
+    tone(ctx, out, { type: "triangle", freqFrom: f, gain: 0.16, duration: 0.5, at: i * 0.12 });
+  });
+  tone(ctx, out, { type: "sine", freqFrom: 1568, gain: 0.08, duration: 0.9, at: 0.5 });
+  // Warm root swell that fades in then out under the arpeggio.
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = 130.81; // C3
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.001, t0);
+  g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.3);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 1.7);
+  osc.connect(g).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + 1.8);
+  osc.onended = () => g.disconnect();
+}
+
 /** Ease the drill toward the current dig state; call once per frame. */
 export function updateDrillVoice(
   v: DrillVoice,

@@ -505,8 +505,8 @@ export class Game {
   private reachAnomaly(): void {
     this.goalReached = true;
     this.state = "won";
-    const p = this.player;
-    this.pushFx({ kind: "upgrade", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+    // No fx here — the beacon, the audio sting, and the payoff screen carry it
+    // (an "upgrade" fx would wrongly pop a "★ UPGRADED" reward number).
     this.saveNow();
   }
 

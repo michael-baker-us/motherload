@@ -8,6 +8,15 @@ const FUEL_BEEP_INTERVAL = 1.8;
 /** Fuel fraction below which the warning starts. */
 const FUEL_WARN_FRACTION = 0.25;
 
+/** Slow ambient progression in A minor (Am – F – C – G) — four voices each. */
+const PAD_CHORDS = [
+  [220.0, 261.63, 329.63, 440.0], // Am  A3 C4 E4 A4
+  [174.61, 261.63, 349.23, 440.0], // F   F3 C4 F4 A4
+  [261.63, 329.63, 392.0, 523.25], // C   C4 E4 G4 C5
+  [196.0, 246.94, 392.0, 493.88], // G   G3 B3 G4 B4
+];
+const CHORD_SECONDS = 5;
+
 let active: AudioEngine | null = null;
 
 /** The engine main.ts registered, if any — how DOM overlays reach audio controls. */
@@ -42,8 +51,13 @@ export class AudioEngine {
   private drill: sfx.DrillVoice | null = null;
   private wind: LoopVoice | null = null;
   private rumble: LoopVoice | null = null;
+  private pad: sfx.PadVoice | null = null;
   private beepTimer = 0;
   private lastTime = 0;
+  private lastState = "";
+  private chordIdx = 0;
+  private chordTimer = CHORD_SECONDS;
+  private arpTimer = 3;
 
   constructor(settings: AudioSettings, storage: SaveStorage | null = null) {
     this.settings = settings;
@@ -119,6 +133,29 @@ export class AudioEngine {
     const depth = game.depth;
     this.setLoop(this.wind, Math.max(0, 1 - depth / 12) * 0.045, now, 0.4);
     this.setLoop(this.rumble, Math.min(1, Math.max(0, (depth - 8) / 30)) * 0.06, now, 0.4);
+    // Musical pad: clearly present at the surface (above the wind bed),
+    // swelling further as you descend.
+    if (this.pad) {
+      this.pad.gain.gain.setTargetAtTime(0.09 + Math.min(1, depth / 80) * 0.07, now, 0.6);
+      // Advance the chord progression so the pad evolves, not drones.
+      this.chordTimer -= dt;
+      if (this.chordTimer <= 0) {
+        this.chordTimer = CHORD_SECONDS;
+        this.chordIdx = (this.chordIdx + 1) % PAD_CHORDS.length;
+        const chord = PAD_CHORDS[this.chordIdx]!;
+        this.pad.oscs.forEach((o, i) => o.frequency.setTargetAtTime(chord[i]!, now, 0.9));
+      }
+      // Sparse twinkling melody from the current chord, an octave up.
+      this.arpTimer -= dt;
+      if (this.arpTimer <= 0) {
+        this.arpTimer = 2.2 + Math.random() * 2.5;
+        const chord = PAD_CHORDS[this.chordIdx]!;
+        sfx.playPadNote(ctx, this.master, chord[1 + Math.floor(Math.random() * 3)]! * 2);
+      }
+    }
+    // Triumphant sting the instant the objective is reached.
+    if (game.state === "won" && this.lastState !== "won") sfx.playAnomalyStinger(ctx, this.master);
+    this.lastState = game.state;
 
     if (playing && p.fuel / p.maxFuel < FUEL_WARN_FRACTION && !game.cheats.unlimitedFuel) {
       this.beepTimer -= dt;
@@ -221,6 +258,8 @@ export class AudioEngine {
     this.drill = sfx.buildDrillVoice(ctx, loopBus);
     this.wind = this.makeNoiseLoop("bandpass", 300, 0.4);
     this.rumble = this.makeNoiseLoop("lowpass", 90, 1);
+    // Music pad plays steady above the SFX duck bus, on the master.
+    this.pad = sfx.buildPad(ctx, master);
   }
 
   private makeNoiseLoop(type: BiquadFilterType, freq: number, playbackRate: number): LoopVoice {
