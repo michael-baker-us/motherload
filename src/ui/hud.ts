@@ -11,6 +11,8 @@ export interface HudData {
   cargoCapacity: number;
   /** Contextual prompt, e.g. "[E] enter FUEL DEPOT". */
   hint: string | null;
+  /** First-run guided objective, centered near the top; null when done. */
+  onboarding: { text: string; step: number; total: number } | null;
   /** Transient message; total lets the HUD animate the slide-in. */
   toast: { text: string; timeLeft: number; total: number } | null;
   /** Dev cheats active — progress is not being saved. */
@@ -138,6 +140,31 @@ export class Hud {
       ctx.fillText(text, px + 8, viewH - 29);
       ctx.globalAlpha = 1;
       px -= 6;
+    }
+
+    // First-run objective banner, centered near the top.
+    if (data.onboarding) {
+      const o = data.onboarding;
+      const label = `GETTING STARTED · ${o.step}/${o.total}`;
+      ctx.font = `bold 14px ${MONO}`;
+      const tw = ctx.measureText(o.text).width;
+      ctx.font = `bold 10px ${MONO}`;
+      const cardW = Math.max(tw, ctx.measureText(label).width) + 40;
+      const cardX = Math.round((viewW - cardW) / 2);
+      const cardY = Math.round(viewH * 0.13);
+      ctx.fillStyle = "rgba(10,12,16,0.82)";
+      ctx.beginPath();
+      ctx.roundRect(cardX, cardY, cardW, 48, 12);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,233,122,0.4)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,233,122,0.75)";
+      ctx.font = `bold 10px ${MONO}`;
+      ctx.fillText(label, cardX + 20, cardY + 10);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `bold 14px ${MONO}`;
+      ctx.fillText(o.text, cardX + 20, cardY + 25);
     }
 
     // Toast: slides down and fades out.

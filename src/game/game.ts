@@ -4,7 +4,8 @@ import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
 import { DRILL, ECONOMY, FUEL, HULL, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
-import { addToCargo, refuelPlan, salvageFeeFor } from "./economy";
+import { addToCargo, cargoUnits, cargoValue, refuelPlan, salvageFeeFor } from "./economy";
+import { Onboarding, type OnboardPrompt } from "./onboarding";
 import { digHazard, fallDamage } from "./hazards";
 import {
   DYNAMITE,
@@ -76,6 +77,10 @@ export class Game {
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
   toast: { text: string; timeLeft: number; total: number } | null = null;
+  /** First-run guided descent; null once done or for a continued save. */
+  onboarding: Onboarding | null = null;
+  /** Set the first time cargo is sold — the onboarding's final beat. */
+  soldCargo = false;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
   fuse: { x: number; y: number; timeLeft: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */
@@ -129,6 +134,7 @@ export class Game {
 
   startNewGame(): void {
     this.state = "playing";
+    this.onboarding = new Onboarding();
     this.saveNow();
   }
 
@@ -271,6 +277,12 @@ export class Game {
       this.die("Out of fuel");
       return;
     }
+
+    this.onboarding?.update({
+      depth: this.depth,
+      cargoUnits: cargoUnits(p.cargo),
+      soldCargo: this.soldCargo,
+    });
 
     const station = this.currentStation();
     if (station && input.wasPressed("Enter", "KeyE")) {
@@ -420,6 +432,24 @@ export class Game {
       this.showToast(`CAUGHT IN THE BLAST! −${damage} hull`, 2);
       this.applyDamage(damage, "Blown up by own dynamite");
     }
+  }
+
+  /** Sell the whole cargo bay at market value. Returns the amount earned. */
+  sellCargo(): number {
+    const p = this.player;
+    const total = cargoValue(p.cargo);
+    if (total <= 0) return 0;
+    this.money += total;
+    p.cargo.clear();
+    this.soldCargo = true;
+    this.pushFx({ kind: "sell", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+    return total;
+  }
+
+  /** Current onboarding prompt while playing, or null when there's none. */
+  onboardingHint(): OnboardPrompt | null {
+    if (this.state !== "playing") return null;
+    return this.onboarding?.prompt ?? null;
   }
 
   /** Repair as much hull as money covers, at HULL.repairPricePerHp. */

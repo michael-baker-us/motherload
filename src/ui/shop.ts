@@ -123,9 +123,7 @@ export class ShopOverlay {
 
     const total = cargoValue(p.cargo);
     this.button(`Sell all — $${total}`, total > 0, () => {
-      game.money += total;
-      p.cargo.clear();
-      game.pushFx({ kind: "sell", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+      game.sellCargo();
       this.render(station, game);
     });
 

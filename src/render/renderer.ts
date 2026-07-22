@@ -203,6 +203,7 @@ export class Renderer {
         cargoUnits: cargoUnits(p.cargo),
         cargoCapacity: p.cargoCapacity,
         hint: game.stationHint(),
+        onboarding: game.onboardingHint(),
         toast: game.toast,
         dev: game.devMode,
         items: ITEM_ORDER.map((id, i) => ({
