@@ -1,4 +1,5 @@
 import { clamp } from "../engine/math";
+import { alpha, palette } from "../render/palette";
 
 export interface HudData {
   depth: number;
@@ -73,7 +74,7 @@ export class Hud {
 
     // Money, ticking toward the real value.
     ctx.font = `bold 18px ${MONO}`;
-    ctx.fillStyle = "#ffd75e";
+    ctx.fillStyle = palette.moneyGold;
     ctx.fillText(`$${Math.round(this.shownMoney).toLocaleString()}`, 24, 22);
 
     // Depth, right-aligned.
@@ -87,9 +88,9 @@ export class Hud {
     ctx.fillText(depthText, 12 + PANEL_W - 14 - ctx.measureText(depthText).width, 29);
 
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 7);
-    this.bar(ctx, "FUEL", 50, this.shownFuel, data.fuel / data.maxFuel < 0.25, "#5fd75f", pulse);
-    this.bar(ctx, "HULL", 68, this.shownHull, data.hull / data.maxHull < 0.25, "#6fb7ff", pulse);
-    this.bar(ctx, "BAY", 86, this.shownBay, false, "#c9a05a", pulse);
+    this.bar(ctx, "FUEL", 50, this.shownFuel, data.fuel / data.maxFuel < 0.25, palette.good, pulse);
+    this.bar(ctx, "HULL", 68, this.shownHull, data.hull / data.maxHull < 0.25, palette.anomalyDim, pulse);
+    this.bar(ctx, "BAY", 86, this.shownBay, false, palette.amberDim, pulse);
 
     // Dev-mode badge under the panel: loud on purpose — saves are off.
     if (data.dev) {
@@ -113,9 +114,9 @@ export class Hud {
       ctx.beginPath();
       ctx.roundRect(12, viewH - 58, w + 22, 24, 12);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,233,122,0.35)";
+      ctx.strokeStyle = alpha(palette.amber, 0.35);
       ctx.stroke();
-      ctx.fillStyle = "#ffe97a";
+      ctx.fillStyle = palette.amber;
       ctx.fillText(data.hint, 23, viewH - 52);
     }
     ctx.fillStyle = "rgba(255,255,255,0.45)";
@@ -138,7 +139,7 @@ export class Hud {
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.14)";
       ctx.stroke();
-      ctx.fillStyle = item.count > 0 ? "#ffe97a" : "#9a9a9a";
+      ctx.fillStyle = item.count > 0 ? palette.amber : "#9a9a9a";
       ctx.fillText(text, px + 8, viewH - 29);
       ctx.globalAlpha = 1;
       px -= 6;
@@ -158,10 +159,10 @@ export class Hud {
       ctx.beginPath();
       ctx.roundRect(cardX, cardY, cardW, 48, 12);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,233,122,0.4)";
+      ctx.strokeStyle = alpha(palette.amber, 0.4);
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = "rgba(255,233,122,0.75)";
+      ctx.fillStyle = alpha(palette.amber, 0.75);
       ctx.font = `bold 10px ${MONO}`;
       ctx.fillText(label, cardX + 20, cardY + 10);
       ctx.fillStyle = "#ffffff";
@@ -182,10 +183,10 @@ export class Hud {
       ctx.beginPath();
       ctx.roundRect(cardX, cardY, cardW, 42, 12);
       ctx.fill();
-      ctx.strokeStyle = "rgba(140,200,255,0.4)";
+      ctx.strokeStyle = alpha(palette.anomaly, 0.4);
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = "#8ec8ff";
+      ctx.fillStyle = palette.anomaly;
       ctx.fillText(label, cardX + 18, cardY + 9);
       ctx.fillStyle = "rgba(255,255,255,0.75)";
       ctx.textAlign = "right";
@@ -200,7 +201,7 @@ export class Hud {
       ctx.roundRect(barX, cardY + 28, barW, 6, 3);
       ctx.fill();
       if (frac > 0.01) {
-        ctx.fillStyle = "#6fb7ff";
+        ctx.fillStyle = palette.anomalyDim;
         ctx.beginPath();
         ctx.roundRect(barX, cardY + 28, barW * frac, 6, 3);
         ctx.fill();
@@ -220,9 +221,9 @@ export class Hud {
       ctx.beginPath();
       ctx.roundRect(x - 18, y, w + 36, 32, 16);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,233,122,0.3)";
+      ctx.strokeStyle = alpha(palette.amber, 0.3);
       ctx.stroke();
-      ctx.fillStyle = "#ffe97a";
+      ctx.fillStyle = palette.amber;
       ctx.fillText(data.toast.text, x, y + 8);
       ctx.globalAlpha = 1;
     }
@@ -239,7 +240,7 @@ export class Hud {
     pulse: number,
   ): void {
     ctx.font = `bold 9px ${MONO}`;
-    ctx.fillStyle = low ? `rgba(224,74,58,${0.55 + pulse * 0.45})` : "rgba(255,255,255,0.5)";
+    ctx.fillStyle = low ? alpha(palette.danger, 0.55 + pulse * 0.45) : "rgba(255,255,255,0.5)";
     ctx.fillText(label, 24, y + 1);
 
     ctx.fillStyle = "rgba(255,255,255,0.1)";
@@ -249,7 +250,7 @@ export class Hud {
 
     const fill = clamp(frac, 0, 1);
     if (fill > 0.01) {
-      const c = low ? "#e04a3a" : color;
+      const c = low ? palette.danger : color;
       // Soft glow underlay, then the crisp fill.
       ctx.globalAlpha = low ? 0.25 + pulse * 0.3 : 0.28;
       ctx.fillStyle = c;
