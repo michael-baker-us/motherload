@@ -124,6 +124,12 @@ export class MenuOverlay {
       this.close(); // resume so the arrival + payoff play out
     });
 
+    // Live pace readout for tuning the balance by feel.
+    this.button(`Telemetry: ${game.showTelemetry ? "ON" : "OFF"}`, "#3a5a9a", () => {
+      game.showTelemetry = !game.showTelemetry;
+      this.render(game);
+    });
+
     this.button("Resume", "#3d5a80", () => this.close());
   }
 

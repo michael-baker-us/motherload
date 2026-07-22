@@ -86,6 +86,8 @@ export class Game {
   runTime = 0;
   deaths = 0;
   maxDepth = 0;
+  /** Dev readout for balance tuning — a display toggle, not a cheat. */
+  showTelemetry = false;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
   fuse: { x: number; y: number; timeLeft: number } | null = null;
   /** Drained by the renderer each frame; capped so it can't grow headless. */

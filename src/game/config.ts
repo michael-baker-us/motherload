@@ -17,7 +17,10 @@ export const WORLD = {
 
 /** Vertical-slice demo objective. Depth is in metres (= tiles below surface). */
 export const SLICE = {
-  goalDepth: 300, // reach this depth to trigger the "anomaly reached" payoff (tuned in the balance pass)
+  // Tuned for a ~5-min arc: ~84s of pure digging, reachable with 1–2 upgrades.
+  // Measured dig rate is ~0.5–0.65 s/m and one starting tank digs ~60m round-trip,
+  // so 300m was a 15–25 min grind. 150m is the demo's tight descent.
+  goalDepth: 150,
 };
 
 export const PHYSICS = {

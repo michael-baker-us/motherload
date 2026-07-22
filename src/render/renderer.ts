@@ -1,11 +1,11 @@
 import { clamp, lerp } from "../engine/math";
-import { TILE, VIEW } from "../game/config";
+import { SLICE, TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
-import { TILE_DEFS, TileId } from "../game/tiles";
+import { hardnessScaleAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
@@ -89,6 +89,7 @@ export class Renderer {
   private fade = 0;
   private deathT = 0;
   private wonT = 0;
+  private fpsAvg = 60;
 
   constructor() {
     this.textures = makeTileTextures();
@@ -227,6 +228,7 @@ export class Renderer {
       },
       dt,
     );
+    if (game.showTelemetry) this.drawTelemetry(ctx, game, dt);
     if (game.state === "dead") this.drawDeathScreen(ctx, game, this.deathT);
     if (game.state === "won") this.drawWinScreen(ctx, game, this.wonT);
 
@@ -1152,6 +1154,44 @@ export class Renderer {
     ctx.globalCompositeOperation = "source-over";
   }
 
+  /** Dev pace readout for balance tuning (toggled in the menu). */
+  private drawTelemetry(ctx: CanvasRenderingContext2D, game: Game, dt: number): void {
+    this.fpsAvg += (1 / Math.max(dt, 1e-4) - this.fpsAvg) * 0.1;
+    const p = game.player;
+    const depth = game.depth;
+    const digRate = (0.25 * hardnessScaleAt(depth)) / Math.max(0.01, game.drillPower);
+    const secs = Math.floor(game.runTime % 60)
+      .toString()
+      .padStart(2, "0");
+    const perMin = game.runTime > 2 ? Math.round((game.money / game.runTime) * 60) : 0;
+    const lines = [
+      `FPS    ${Math.round(this.fpsAvg)}`,
+      `TIME   ${Math.floor(game.runTime / 60)}:${secs}`,
+      `DEPTH  ${depth} / ${game.maxDepth}m  goal ${SLICE.goalDepth}`,
+      `FUEL   ${Math.round(p.fuel)}/${p.maxFuel}`,
+      `MONEY  $${game.money}  ${perMin}/min`,
+      `BAY    ${cargoUnits(p.cargo)}/${p.cargoCapacity}`,
+      `DIG    ${digRate.toFixed(2)} s/tile`,
+      `DEATHS ${game.deaths}`,
+    ];
+    const vw = ctx.canvas.clientWidth;
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.textBaseline = "top";
+    const w = 176;
+    const x = vw - w - 12;
+    const y = 150;
+    ctx.fillStyle = "rgba(6,10,16,0.8)";
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, lines.length * 15 + 16, 8);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(140,200,255,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#bfe0ff";
+    lines.forEach((l, i) => ctx.fillText(l, x + 10, y + 9 + i * 15));
+    ctx.font = "14px monospace";
+  }
+
   private drawVignette(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
     const grad = ctx.createRadialGradient(
       vw / 2,
@@ -1229,7 +1269,7 @@ export class Renderer {
     ctx.fillStyle = "#d8e6ff";
     ctx.font = "15px monospace";
     const lines = [
-      "Deep-scan has flagged an anomaly 300 metres down.",
+      `Deep-scan has flagged an anomaly ${SLICE.goalDepth} metres down.`,
       "Mine minerals to fund your rig, upgrade the drill and tank,",
       "and descend to reach it. There's no refuelling down there —",
       "watch your gauge, and don't get greedy.",
