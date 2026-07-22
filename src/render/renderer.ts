@@ -187,7 +187,8 @@ export class Renderer {
     this.drillRecoil = Math.max(0, this.drillRecoil - dt * 7);
     this.flash = Math.max(0, this.flash - dt * 2.2);
 
-    const shakeMag = this.shake * this.shake * 22;
+    // Reduced-motion suppresses the screen shake (accessibility/photosensitivity).
+    const shakeMag = viewPrefs.reducedMotion ? 0 : this.shake * this.shake * 22;
     ctx.save();
     ctx.scale(ZOOM, ZOOM);
     ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
@@ -205,7 +206,8 @@ export class Renderer {
     const podScreenY = (py - cam.y + p.height / 2) * ZOOM;
     this.applyLighting(ctx, game, podScreenX, podScreenY, screenW, screenH);
     this.drawVignette(ctx, screenW, screenH);
-    if (this.flash > 0) this.drawFlash(ctx, screenW, screenH);
+    // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
+    if (this.flash > 0 && !viewPrefs.reducedMotion) this.drawFlash(ctx, screenW, screenH);
 
     if (game.state === "title") {
       this.drawTitleScreen(ctx, game);

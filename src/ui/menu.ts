@@ -1,6 +1,6 @@
 import { activeAudio } from "../audio/engine";
 import type { DevCheats, Game } from "../game/game";
-import { toggleDepthView, viewPrefs } from "../render/prefs";
+import { toggleDepthView, toggleReducedMotion, viewPrefs } from "../render/prefs";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFuel", "Unlimited fuel"],
@@ -80,6 +80,11 @@ export class MenuOverlay {
 
     this.button(`View: ${viewPrefs.depth ? "2.5D" : "Flat"}`, "#3d5a80", () => {
       toggleDepthView(window.localStorage);
+      this.render(game);
+    });
+
+    this.button(`Reduce shake & flash: ${viewPrefs.reducedMotion ? "ON" : "OFF"}`, "#3d5a80", () => {
+      toggleReducedMotion(window.localStorage);
       this.render(game);
     });
 
