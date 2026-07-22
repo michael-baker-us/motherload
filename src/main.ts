@@ -29,6 +29,7 @@ touchControls.mount(input);
 if (import.meta.env.DEV) {
   (window as unknown as { __game: Game }).__game = game;
   (window as unknown as { __audio: AudioEngine }).__audio = audio;
+  (window as unknown as { __renderer: Renderer }).__renderer = renderer;
 }
 
 function resize(): void {

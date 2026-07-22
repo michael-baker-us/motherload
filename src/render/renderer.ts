@@ -103,6 +103,8 @@ export class Renderer {
   private deathT = 0;
   private wonT = 0;
   private fpsAvg = 60;
+  private vignetteGrad: CanvasGradient | null = null;
+  private vignetteKey = "";
 
   constructor() {
     this.textures = makeTileTextures();
@@ -1256,17 +1258,24 @@ export class Renderer {
   }
 
   private drawVignette(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
-    const grad = ctx.createRadialGradient(
-      vw / 2,
-      vh / 2,
-      Math.min(vw, vh) * 0.45,
-      vw / 2,
-      vh / 2,
-      Math.max(vw, vh) * 0.75,
-    );
-    grad.addColorStop(0, "rgba(0,0,0,0)");
-    grad.addColorStop(1, "rgba(0,0,0,0.3)");
-    ctx.fillStyle = grad;
+    // The vignette only changes on resize — cache it instead of rebuilding the
+    // gradient every frame (avoids per-frame allocation / GC churn).
+    const key = `${vw}x${vh}`;
+    if (this.vignetteKey !== key || !this.vignetteGrad) {
+      const grad = ctx.createRadialGradient(
+        vw / 2,
+        vh / 2,
+        Math.min(vw, vh) * 0.45,
+        vw / 2,
+        vh / 2,
+        Math.max(vw, vh) * 0.75,
+      );
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(1, "rgba(0,0,0,0.3)");
+      this.vignetteGrad = grad;
+      this.vignetteKey = key;
+    }
+    ctx.fillStyle = this.vignetteGrad;
     ctx.fillRect(0, 0, vw, vh);
   }
 
