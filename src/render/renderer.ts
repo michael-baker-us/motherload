@@ -1289,33 +1289,81 @@ export class Renderer {
   // --- Screens -------------------------------------------------------------
 
   private drawTitleScreen(ctx: CanvasRenderingContext2D, game: Game): void {
-    const viewWidth = ctx.canvas.clientWidth;
-    const viewHeight = ctx.canvas.clientHeight;
-    ctx.fillStyle = "rgba(10, 6, 3, 0.6)";
-    ctx.fillRect(0, 0, viewWidth, viewHeight);
+    const vw = ctx.canvas.clientWidth;
+    const vh = ctx.canvas.clientHeight;
+    const t = this.time;
+    const cx = vw / 2;
+    const ly = vh * 0.33; // logo baseline
 
-    ctx.textBaseline = "top";
-    ctx.font = "bold 56px monospace";
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    center(ctx, "MOTHERLOAD", viewWidth, viewHeight * 0.26 + 4);
-    ctx.fillStyle = "#f0c020";
-    center(ctx, "MOTHERLOAD", viewWidth, viewHeight * 0.26);
-    ctx.fillStyle = "#d8c9b8";
-    ctx.font = "15px monospace";
-    center(ctx, "dig deep · sell minerals · upgrade · don't run dry", viewWidth, viewHeight * 0.26 + 72);
+    // Cinematic wash over the living sky: darker top & bottom, warm centre glow.
+    const wash = ctx.createLinearGradient(0, 0, 0, vh);
+    wash.addColorStop(0, "rgba(6,4,10,0.74)");
+    wash.addColorStop(0.5, "rgba(8,5,4,0.4)");
+    wash.addColorStop(1, "rgba(5,3,2,0.82)");
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, vw, vh);
+    const glow = ctx.createRadialGradient(cx, ly, 10, cx, ly, vw * 0.42);
+    glow.addColorStop(0, "rgba(255,178,60,0.15)");
+    glow.addColorStop(1, "rgba(255,178,60,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, vw, vh);
 
-    const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);
-    ctx.fillStyle = `rgba(255,233,122,${pulse})`;
-    ctx.font = "17px monospace";
-    center(ctx, game.hasSave ? "[Enter] continue" : "[Enter] start digging", viewWidth, viewHeight * 0.55);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Logo: bevelled, gold-gradient, softly glowing MOTHERLOAD.
+    const size = Math.min(74, vw / 8.2);
+    ctx.font = `900 ${size}px ui-monospace, monospace`;
+    ctx.letterSpacing = `${(size * 0.05).toFixed(1)}px`;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillText("MOTHERLOAD", cx + 3, ly + 4); // drop shadow
+    const grad = ctx.createLinearGradient(0, ly - size * 0.55, 0, ly + size * 0.55);
+    grad.addColorStop(0, "#fff0b4");
+    grad.addColorStop(0.5, "#f0c020");
+    grad.addColorStop(1, "#bd7a1a");
+    ctx.save();
+    ctx.shadowColor = `rgba(255,180,60,${(0.35 + 0.25 * Math.sin(t * 1.5)).toFixed(3)})`;
+    ctx.shadowBlur = 26;
+    ctx.fillStyle = grad;
+    ctx.fillText("MOTHERLOAD", cx, ly);
+    ctx.restore();
+    ctx.letterSpacing = "0px";
+
+    // Mood subtitle + a thin rule + a demo tag.
+    ctx.font = `600 ${Math.min(15, vw / 62)}px ui-monospace, monospace`;
+    ctx.fillStyle = "rgba(232,214,184,0.85)";
+    ctx.fillText("A  S U B T E R R A N E A N   D E S C E N T", cx, ly + size * 0.7);
+    ctx.strokeStyle = "rgba(255,200,110,0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 150, ly + size * 0.95);
+    ctx.lineTo(cx + 150, ly + size * 0.95);
+    ctx.stroke();
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillStyle = "rgba(140,200,255,0.7)";
+    ctx.fillText("◈  PRE-ALPHA DEMO", cx, ly + size * 1.18);
+
+    // Menu prompts.
+    const py = vh * 0.63;
+    const prompt = 0.72 + 0.28 * Math.sin(t * 3);
+    ctx.font = "bold 20px ui-monospace, monospace";
+    ctx.fillStyle = `rgba(255,233,122,${prompt.toFixed(3)})`;
+    ctx.fillText(game.hasSave ? "▸  CONTINUE" : "▸  START DIGGING", cx, py);
+    ctx.font = "13px ui-monospace, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.fillText("press  [ Enter ]", cx, py + 26);
     if (game.hasSave) {
-      ctx.fillStyle = "#d8c9b8";
-      ctx.font = "14px monospace";
-      center(ctx, "[N] new game (overwrites the save)", viewWidth, viewHeight * 0.55 + 30);
+      ctx.fillStyle = "rgba(216,201,184,0.8)";
+      ctx.fillText("[ N ]  new game  ·  overwrites save", cx, py + 50);
     }
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.font = "13px monospace";
-    center(ctx, "← → fly/dig · ↑ thrust · ↓ drill · E station", viewWidth, viewHeight * 0.55 + 64);
+
+    // Controls, along the bottom.
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "12px ui-monospace, monospace";
+    ctx.fillText("← →  move    ↑  thrust    ↓  drill    E  station", cx, vh - 28);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
     ctx.font = "14px monospace";
   }
 
