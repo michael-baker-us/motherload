@@ -5,6 +5,7 @@ import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
+import { biomeAt } from "../game/biomes";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { viewPrefs } from "./prefs";
@@ -203,6 +204,15 @@ export class Renderer {
     this.drawFloats(ctx, cam);
     this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
     ctx.restore();
+
+    // Biome mood wash over the world (subtle; the fog colour carries the deep).
+    const biome = biomeAt(cam.y / TILE + cam.viewHeight / TILE / 2 - game.world.surfaceRow);
+    if (biome.tintAlpha > 0) {
+      ctx.globalAlpha = biome.tintAlpha;
+      ctx.fillStyle = biome.tint;
+      ctx.fillRect(0, 0, screenW, screenH);
+      ctx.globalAlpha = 1;
+    }
 
     const podScreenX = (px - cam.x + p.width / 2) * ZOOM;
     const podScreenY = (py - cam.y + p.height / 2) * ZOOM;
@@ -1163,7 +1173,9 @@ export class Renderer {
     const lctx = lc.getContext("2d")!;
     lctx.globalCompositeOperation = "source-over";
     lctx.clearRect(0, 0, screenW, screenH);
-    lctx.fillStyle = `rgba(8,3,0,${this.darkness})`;
+    // The darkness takes the biome's fog colour — the dominant tint down deep.
+    const fog = biomeAt(centerDepth).fog;
+    lctx.fillStyle = `rgba(${fog[0]},${fog[1]},${fog[2]},${this.darkness})`;
     lctx.fillRect(0, 0, screenW, screenH);
 
     // Punch the headlight halo out of the darkness.

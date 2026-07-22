@@ -1,3 +1,4 @@
+import { biomeAt } from "../game/biomes";
 import type { FxEvent, Game } from "../game/game";
 import type { SaveStorage } from "../game/save";
 import { clampVolume, saveAudioSettings, VOLUME_STEP, type AudioSettings } from "./settings";
@@ -132,7 +133,9 @@ export class AudioEngine {
     // Ambient beds crossfade with depth: wind topside, rumble down deep.
     const depth = game.depth;
     this.setLoop(this.wind, Math.max(0, 1 - depth / 12) * 0.045, now, 0.4);
-    this.setLoop(this.rumble, Math.min(1, Math.max(0, (depth - 8) / 30)) * 0.06, now, 0.4);
+    // Rumble bed intensity flavoured by biome (magma roars, topsoil is quiet).
+    const rumbleBase = Math.min(1, Math.max(0, (depth - 8) / 30)) * 0.06;
+    this.setLoop(this.rumble, rumbleBase * biomeAt(depth).rumble, now, 0.4);
     // Musical pad: clearly present at the surface (above the wind bed),
     // swelling further as you descend.
     if (this.pad) {

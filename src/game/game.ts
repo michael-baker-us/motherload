@@ -1,5 +1,6 @@
 import { keysFor } from "../engine/bindings";
 import { Camera } from "../engine/camera";
+import { BIOMES, biomeIndexAt } from "./biomes";
 import type { Input } from "../engine/input";
 import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
@@ -28,7 +29,7 @@ import {
   type SaveStorage,
 } from "./save";
 import { stationInSpan, type Station } from "./stations";
-import { TILE_DEFS, TileId } from "./tiles";
+import { stratumAt, TILE_DEFS, TileId } from "./tiles";
 import {
   createUpgradeState,
   currentTier,
@@ -91,6 +92,8 @@ export class Game {
   runTime = 0;
   deaths = 0;
   maxDepth = 0;
+  /** Deepest biome index reached — so each biome announces itself only once. */
+  deepestBiome = 0;
   /** Dev readout for balance tuning — a display toggle, not a cheat. */
   showTelemetry = false;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
@@ -151,6 +154,7 @@ export class Game {
     this.runTime = 0;
     this.deaths = 0;
     this.maxDepth = 0;
+    this.deepestBiome = 0;
     this.saveNow();
   }
 
@@ -319,6 +323,12 @@ export class Game {
     });
 
     this.maxDepth = Math.max(this.maxDepth, this.depth);
+    // Announce each biome the first time it's reached.
+    const bi = biomeIndexAt(this.depth);
+    if (bi > this.deepestBiome) {
+      this.deepestBiome = bi;
+      this.showToast(`◈  ${BIOMES[bi]!.name}`, 2.5);
+    }
     if (!this.goalReached && this.depth >= SLICE.goalDepth) {
       this.reachAnomaly();
       return;
@@ -511,6 +521,30 @@ export class Game {
     // No fx here — the beacon, the audio sting, and the payoff screen carry it
     // (an "upgrade" fx would wrongly pop a "★ UPGRADED" reward number).
     this.saveNow();
+  }
+
+  /**
+   * Dev/test: warp to a given depth (metres) — used to jump between biomes.
+   * Carves a landing pocket with a floor matching the stratum, and marks the
+   * goal claimed so the payoff doesn't fire mid-exploration.
+   */
+  devWarpToDepth(depthMeters: number): void {
+    const col = Math.floor(this.world.width / 2);
+    const row = this.world.surfaceRow + Math.max(0, Math.round(depthMeters));
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -1; dx <= 1; dx++) this.world.setTile(col + dx, row + dy, TileId.Empty);
+    }
+    this.world.setTile(col, row + 3, stratumAt(depthMeters));
+    const p = this.player;
+    p.x = col * TILE + (TILE - p.width) / 2;
+    p.y = row * TILE;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.hasDigTarget = false;
+    p.digProgress = 0;
+    this.goalReached = true; // exploring, not chasing the payoff
   }
 
   /**

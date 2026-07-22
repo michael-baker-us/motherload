@@ -468,6 +468,14 @@ describe("vertical-slice objective", () => {
     // The warp drops the pod into the chamber; let it fall to the goal depth.
     for (let i = 0; i < 120 && game.state === "playing"; i++) game.update(DT, idleInput);
     expect(game.state).toBe("won");
+  });
+
+  it("dev warp to depth jumps to a biome without firing the payoff", () => {
+    const game = makeGame();
+    game.devWarpToDepth(300); // past the 150m goal
+    for (let i = 0; i < 120 && game.state === "playing"; i++) game.update(DT, idleInput);
+    expect(game.state).toBe("playing"); // goal marked claimed — no payoff
+    expect(game.maxDepth).toBeGreaterThanOrEqual(290);
     expect(game.runStats().depth).toBeGreaterThanOrEqual(SLICE.goalDepth);
   });
 });

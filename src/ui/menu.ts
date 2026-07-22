@@ -1,4 +1,5 @@
 import { activeAudio } from "../audio/engine";
+import { BIOMES } from "../game/biomes";
 import {
   ACTION_LABELS,
   ACTIONS,
@@ -186,6 +187,13 @@ export class MenuOverlay {
       game.devWarpToGoal();
       this.close(); // resume so the arrival + payoff play out
     });
+    this.line("warp to biome:", "#7f8ba3");
+    for (const biome of BIOMES) {
+      this.button(`◈  ${biome.name}  ·  ${biome.minDepth}m`, "#3a5a9a", () => {
+        game.devWarpToDepth(biome.minDepth + 15);
+        this.close();
+      });
+    }
     this.button(`▦  Telemetry  ·  ${game.showTelemetry ? "ON" : "OFF"}`, game.showTelemetry ? ON : OFF, () => {
       game.showTelemetry = !game.showTelemetry;
       this.render(game);
