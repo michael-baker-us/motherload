@@ -37,7 +37,7 @@ import {
 } from "./upgrades";
 import { World } from "./world";
 
-export type GameState = "title" | "playing" | "shop" | "menu" | "dead" | "won";
+export type GameState = "title" | "briefing" | "playing" | "shop" | "menu" | "dead" | "won";
 
 /**
  * One-shot game events (world coordinates). The audio engine reads the queue
@@ -138,7 +138,7 @@ export class Game {
   }
 
   startNewGame(): void {
-    this.state = "playing";
+    this.state = "briefing"; // a mission-brief card precedes the first descent
     this.onboarding = new Onboarding();
     this.goalReached = false;
     this.runTime = 0;
@@ -192,6 +192,10 @@ export class Game {
       } else if (input.wasPressed("KeyN")) {
         this.startNewGame();
       }
+      return;
+    }
+    if (this.state === "briefing") {
+      if (input.wasPressed("Enter", "Space")) this.state = "playing";
       return;
     }
     if (this.state === "shop" || this.state === "menu") return; // sim paused; the overlay owns input

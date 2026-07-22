@@ -88,6 +88,7 @@ export class Renderer {
   private prevState = "";
   private fade = 0;
   private deathT = 0;
+  private wonT = 0;
 
   constructor() {
     this.textures = makeTileTextures();
@@ -107,14 +108,16 @@ export class Renderer {
     // Fade up from black when arriving in the world (new game or respawn) so
     // the cut into play isn't abrupt; time the death screen's reveal.
     if (this.prevState !== game.state) {
-      if (game.state === "playing" && (this.prevState === "title" || this.prevState === "dead")) {
+      if (game.state === "playing" && (this.prevState === "briefing" || this.prevState === "dead")) {
         this.fade = 1;
       }
       this.deathT = 0;
+      this.wonT = 0;
       this.prevState = game.state;
     }
     this.fade = Math.max(0, this.fade - dt * 3);
     if (game.state === "dead") this.deathT += dt;
+    if (game.state === "won") this.wonT += dt;
 
     const cam = game.camera;
     const p = game.player;
@@ -192,6 +195,14 @@ export class Renderer {
       this.drawTitleScreen(ctx, game);
       return;
     }
+    if (game.state === "briefing") {
+      this.drawBriefingScreen(ctx, screenW, screenH);
+      if (this.fade > 0) {
+        ctx.fillStyle = `rgba(6,4,10,${this.fade.toFixed(3)})`;
+        ctx.fillRect(0, 0, screenW, screenH);
+      }
+      return;
+    }
     this.hud.draw(
       ctx,
       {
@@ -217,7 +228,7 @@ export class Renderer {
       dt,
     );
     if (game.state === "dead") this.drawDeathScreen(ctx, game, this.deathT);
-    if (game.state === "won") this.drawWinScreen(ctx, game);
+    if (game.state === "won") this.drawWinScreen(ctx, game, this.wonT);
 
     // Arrival fade, over everything including the HUD.
     if (this.fade > 0) {
@@ -1205,6 +1216,32 @@ export class Renderer {
     ctx.font = "14px monospace";
   }
 
+  private drawBriefingScreen(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
+    ctx.fillStyle = "rgba(6,9,16,0.82)";
+    ctx.fillRect(0, 0, vw, vh);
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(142,200,255,0.85)";
+    ctx.font = "bold 12px monospace";
+    center(ctx, "◈ INCOMING TRANSMISSION", vw, vh * 0.24);
+    ctx.fillStyle = "#8ec8ff";
+    ctx.font = "bold 34px monospace";
+    center(ctx, "THE SIGNAL", vw, vh * 0.24 + 22);
+    ctx.fillStyle = "#d8e6ff";
+    ctx.font = "15px monospace";
+    const lines = [
+      "Deep-scan has flagged an anomaly 300 metres down.",
+      "Mine minerals to fund your rig, upgrade the drill and tank,",
+      "and descend to reach it. There's no refuelling down there —",
+      "watch your gauge, and don't get greedy.",
+    ];
+    lines.forEach((l, i) => center(ctx, l, vw, vh * 0.24 + 80 + i * 24));
+    const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);
+    ctx.fillStyle = `rgba(255,233,122,${pulse})`;
+    ctx.font = "17px monospace";
+    center(ctx, "[Enter] begin descent", vw, vh * 0.24 + 80 + lines.length * 24 + 24);
+    ctx.font = "14px monospace";
+  }
+
   private drawDeathScreen(ctx: CanvasRenderingContext2D, game: Game, t: number): void {
     const viewWidth = ctx.canvas.clientWidth;
     const viewHeight = ctx.canvas.clientHeight;
@@ -1230,7 +1267,7 @@ export class Renderer {
     ctx.font = "14px monospace";
   }
 
-  private drawWinScreen(ctx: CanvasRenderingContext2D, game: Game): void {
+  private drawWinScreen(ctx: CanvasRenderingContext2D, game: Game, t: number): void {
     const vw = ctx.canvas.clientWidth;
     const vh = ctx.canvas.clientHeight;
     const s = game.runStats();
@@ -1238,33 +1275,41 @@ export class Renderer {
       .toString()
       .padStart(2, "0");
     const time = `${Math.floor(s.time / 60)}:${secs}`;
+    // Reveal the title first, then the stats one by one, then the prompt.
+    const reveal = clamp(t / 0.5, 0, 1);
 
-    ctx.fillStyle = "rgba(4,8,16,0.8)";
+    ctx.fillStyle = `rgba(4,8,16,${(0.82 * reveal).toFixed(3)})`;
     ctx.fillRect(0, 0, vw, vh);
     ctx.textBaseline = "top";
+    ctx.globalAlpha = reveal;
     ctx.fillStyle = "rgba(142,200,255,0.8)";
     ctx.font = "bold 12px monospace";
-    center(ctx, "◈ DEMO COMPLETE", vw, vh * 0.3);
+    center(ctx, "◈ DEMO COMPLETE", vw, vh * 0.3 - (1 - reveal) * 10);
     ctx.fillStyle = "#8ec8ff";
     ctx.font = "bold 32px monospace";
-    center(ctx, "ANOMALY REACHED", vw, vh * 0.3 + 24);
+    center(ctx, "ANOMALY REACHED", vw, vh * 0.3 + 24 - (1 - reveal) * 10);
     ctx.fillStyle = "#d8e6ff";
     ctx.font = "15px monospace";
     center(ctx, "You've reached the signal at the bottom of the world.", vw, vh * 0.3 + 70);
 
-    ctx.fillStyle = "#ffffff";
     ctx.font = "15px monospace";
+    ctx.fillStyle = "#ffffff";
     const stats = [
       `Depth reached    ${s.depth} m`,
       `Minerals banked  $${s.money.toLocaleString()}`,
       `Time             ${time}`,
       `Pods lost        ${s.deaths}`,
     ];
-    stats.forEach((line, i) => center(ctx, line, vw, vh * 0.3 + 108 + i * 26));
+    stats.forEach((line, i) => {
+      ctx.globalAlpha = clamp((t - (0.6 + i * 0.18)) / 0.35, 0, 1);
+      center(ctx, line, vw, vh * 0.3 + 108 + i * 26);
+    });
 
+    ctx.globalAlpha = clamp((t - (0.6 + stats.length * 0.18 + 0.25)) / 0.35, 0, 1);
     ctx.fillStyle = "#ffe97a";
     ctx.font = "16px monospace";
     center(ctx, "[Enter] keep exploring", vw, vh * 0.3 + 108 + stats.length * 26 + 24);
+    ctx.globalAlpha = 1;
     ctx.font = "14px monospace";
   }
 }
