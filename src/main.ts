@@ -1,5 +1,6 @@
 import { AudioEngine } from "./audio/engine";
 import { loadAudioSettings } from "./audio/settings";
+import { loadBindings } from "./engine/bindings";
 import { Loop } from "./engine/loop";
 import { Input } from "./engine/input";
 import { Game } from "./game/game";
@@ -16,6 +17,7 @@ if (!ctx) throw new Error("2d context unavailable");
 const input = new Input();
 input.attach(window);
 loadViewPrefs(window.localStorage);
+loadBindings(window.localStorage);
 
 const game = new Game(window.innerWidth, window.innerHeight, window.localStorage);
 const renderer = new Renderer();

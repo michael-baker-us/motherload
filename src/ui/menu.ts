@@ -1,4 +1,13 @@
 import { activeAudio } from "../audio/engine";
+import {
+  ACTION_LABELS,
+  ACTIONS,
+  keyLabel,
+  keysFor,
+  rebind,
+  resetBindings,
+  type Action,
+} from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
 import { toggleDepthView, toggleReducedMotion, viewPrefs } from "../render/prefs";
 
@@ -17,7 +26,18 @@ export class MenuOverlay {
   private root: HTMLDivElement | null = null;
   private body: HTMLDivElement | null = null;
   private onClose: (() => void) | null = null;
+  private game: Game | null = null;
+  /** The action awaiting a new key, or null. */
+  private rebinding: Action | null = null;
   private keyHandler = (e: KeyboardEvent): void => {
+    // While rebinding, the next key press becomes the binding (Escape cancels).
+    if (this.rebinding) {
+      e.preventDefault();
+      if (e.code !== "Escape") rebind(this.rebinding, e.code, window.localStorage);
+      this.rebinding = null;
+      if (this.game) this.render(this.game);
+      return;
+    }
     if (e.code === "Escape") {
       e.preventDefault();
       this.close();
@@ -38,6 +58,8 @@ export class MenuOverlay {
       "position:relative;background:rgba(16,19,26,0.86);backdrop-filter:blur(14px);color:#e8e8e8;" +
       "border:1px solid rgba(255,255,255,0.14);border-radius:16px;" +
       "box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:20px 24px;width:320px;" +
+      // Scroll inside the panel when it's taller than the viewport.
+      "max-height:88vh;overflow-y:auto;" +
       // fade/slide in on open (slide skipped under reduced-motion)
       "opacity:0;transition:opacity .18s ease, transform .18s ease;" +
       (viewPrefs.reducedMotion ? "" : "transform:translateY(10px) scale(0.985);");
@@ -68,6 +90,8 @@ export class MenuOverlay {
 
     this.root = root;
     this.body = body;
+    this.game = game;
+    this.rebinding = null;
     this.render(game);
   }
 
@@ -77,6 +101,8 @@ export class MenuOverlay {
     this.root.remove();
     this.root = null;
     this.body = null;
+    this.game = null;
+    this.rebinding = null;
     const onClose = this.onClose;
     this.onClose = null;
     onClose?.();
@@ -123,6 +149,24 @@ export class MenuOverlay {
       ]);
       this.line(`volume ${s.muted ? "muted" : `${Math.round(s.volume * 100)}%`}`, "#7f8ba3");
     }
+
+    this.section("Controls");
+    for (const action of ACTIONS) {
+      const listening = this.rebinding === action;
+      const keys = keysFor(action).map(keyLabel).join(" / ") || "unbound";
+      this.button(
+        `${ACTION_LABELS[action]}  ·  ${listening ? "press a key…" : keys}`,
+        listening ? "#c9762e" : OFF,
+        () => {
+          this.rebinding = action;
+          this.render(game);
+        },
+      );
+    }
+    this.button("↺  Reset controls", OFF, () => {
+      resetBindings(window.localStorage);
+      this.render(game);
+    });
 
     this.section("Dev · Testing");
     for (const [cheat, label] of CHEAT_LABELS) {

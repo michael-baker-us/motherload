@@ -1,3 +1,4 @@
+import { keysFor } from "../engine/bindings";
 import { Camera } from "../engine/camera";
 import type { Input } from "../engine/input";
 import { MenuOverlay } from "../ui/menu";
@@ -242,9 +243,9 @@ export class Game {
     });
 
     const move: MoveInput = {
-      thrustUp: input.isDown("ArrowUp", "KeyW", "Space") && p.fuel > 0,
-      moveLeft: input.isDown("ArrowLeft", "KeyA"),
-      moveRight: input.isDown("ArrowRight", "KeyD"),
+      thrustUp: input.isDown(...keysFor("thrust")) && p.fuel > 0,
+      moveLeft: input.isDown(...keysFor("left")),
+      moveRight: input.isDown(...keysFor("right")),
     };
     this.thrusting = move.thrustUp;
     stepPlayer(p, this.world, move, dt);
@@ -264,7 +265,7 @@ export class Game {
       p,
       this.world,
       {
-        down: input.isDown("ArrowDown", "KeyS"),
+        down: input.isDown(...keysFor("drill")),
         left: move.moveLeft,
         right: move.moveRight,
       },
@@ -322,7 +323,7 @@ export class Game {
     }
 
     const station = this.currentStation();
-    if (station && input.wasPressed("Enter", "KeyE")) {
+    if (station && input.wasPressed(...keysFor("interact"))) {
       this.state = "shop";
       this.shop.open(station, this, () => {
         this.state = "playing";
