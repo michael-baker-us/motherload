@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SLICE } from "./config";
 import { STATIONS } from "./stations";
-import { MINERAL_BANDS, TileId } from "./tiles";
+import { MINERAL_BANDS, stratumAt, TileId } from "./tiles";
 import { World } from "./world";
 
 const SURFACE = 6;
@@ -180,6 +180,30 @@ describe("coherent worldgen", () => {
     expect(airInBand(0, 20)).toBe(0);
     expect(airInBand(600, 900)).toBeGreaterThan(airInBand(40, 340));
     expect(airInBand(600, 900)).toBeGreaterThan(100);
+  });
+});
+
+describe("material strata", () => {
+  it("returns the depth-appropriate stratum", () => {
+    expect(stratumAt(0)).toBe(TileId.Dirt);
+    expect(stratumAt(60)).toBe(TileId.Dirt);
+    expect(stratumAt(120)).toBe(TileId.Stone);
+    expect(stratumAt(400)).toBe(TileId.Granite);
+  });
+
+  it("fills the world with the right materials by depth", () => {
+    const w = makeWorld();
+    const countAt = (from: number, to: number, tile: TileId): number => {
+      let n = 0;
+      for (let y = SURFACE + from; y < SURFACE + to; y++) {
+        for (let x = 1; x < w.width - 1; x++) if (w.getTile(x, y) === tile) n++;
+      }
+      return n;
+    };
+    expect(countAt(0, 30, TileId.Dirt)).toBeGreaterThan(0);
+    expect(countAt(0, 30, TileId.Granite)).toBe(0); // no granite near the surface
+    expect(countAt(120, 220, TileId.Stone)).toBeGreaterThan(0); // stone mid-depth
+    expect(countAt(400, 600, TileId.Granite)).toBeGreaterThan(0); // granite deep down
   });
 });
 

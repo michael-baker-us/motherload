@@ -4,7 +4,7 @@ import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { fbm2d, fieldMeanPow, fieldSamples, tailThreshold } from "./noise";
 import { hash2d } from "./rng";
 import { STATIONS } from "./stations";
-import { MINERAL_BANDS, TILE_DEFS, TileId, bandChanceAt, rockChanceAt } from "./tiles";
+import { MINERAL_BANDS, TILE_DEFS, TileId, bandChanceAt, rockChanceAt, stratumAt } from "./tiles";
 
 // Distinct salts so each field/draw derived from the world seed is decorrelated
 // from the others (rock masses, hazard speckle, and ore veins mustn't align).
@@ -15,6 +15,9 @@ const LAVA_DRAW = 0x27d4eb2f;
 const VEIN_FIELD = 0x165667b1;
 const VEIN_DRAW = 0xd3a2646c;
 const CAVE_FIELD = 0x1b873593;
+const STRATUM_FIELD = 0x2545f491;
+/** How far (tiles) the stratum boundaries waver, so bands aren't hard lines. */
+const STRATUM_BLEND = 34;
 
 /**
  * The terrain: a flat Uint8Array of TileIds, row-major. At 60×2000 that's
@@ -34,6 +37,7 @@ export class World {
   private readonly rockFieldSeed: number;
   private readonly veinFieldSeed: number;
   private readonly caveFieldSeed: number;
+  private readonly stratumFieldSeed: number;
   private readonly rockNorm: number;
   /** Empirical CDF of the vein field — turns a target area into a mask threshold. */
   private readonly veinCdf: Float64Array;
@@ -52,6 +56,7 @@ export class World {
     this.rockFieldSeed = seed ^ ROCK_FIELD;
     this.veinFieldSeed = seed ^ VEIN_FIELD;
     this.caveFieldSeed = seed ^ CAVE_FIELD;
+    this.stratumFieldSeed = seed ^ STRATUM_FIELD;
     // Normalise the placement weights so biasing ore/rock toward high field
     // values leaves the average spawn density equal to the chance curves.
     // The fBm field is stationary, so one estimate serves every mineral band.
@@ -166,7 +171,9 @@ export class World {
       const drawSeed = ((VEIN_DRAW ^ this.seed) + band.tile * 0x85ebca6b) | 0;
       if (hash2d(x, y, drawSeed) < fill) return band.tile;
     }
-    return TileId.Dirt;
+    // Diggable filler: the stratum for this depth, its boundary wavered by noise.
+    const waver = (fbm2d(x * 0.05, y * 0.05, this.stratumFieldSeed) - 0.5) * STRATUM_BLEND;
+    return stratumAt(depth + waver);
   }
 
   inBounds(x: number, y: number): boolean {

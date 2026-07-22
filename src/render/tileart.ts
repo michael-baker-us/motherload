@@ -119,6 +119,57 @@ function paintRock(ctx: CanvasRenderingContext2D, rand: () => number, base: stri
   ctx.fillRect(TILE - 2, 0, 2, TILE);
 }
 
+/** Stone: compacted grey-brown — dirt's grit plus cracks that read as harder. */
+function paintStone(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
+  paintDirtBase(ctx, rand, base);
+  ctx.strokeStyle = "rgba(0,0,0,0.28)";
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < 2; i++) {
+    let x = rand() * TILE;
+    let y = rand() * TILE;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 3; s++) {
+      x += (rand() - 0.5) * 14;
+      y += rand() * 8;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
+  ctx.fillRect(0, 0, TILE, 1.5);
+  ctx.fillStyle = "rgba(0,0,0,0.14)";
+  ctx.fillRect(0, TILE - 1.5, TILE, 1.5);
+}
+
+/** Granite: mottled igneous grey with light quartz, dark mica, and feldspar flecks. */
+function paintGranite(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, TILE, TILE);
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = rand() > 0.5 ? `rgba(255,255,255,${0.03 + rand() * 0.05})` : `rgba(0,0,0,${0.05 + rand() * 0.07})`;
+    const r = 3 + rand() * 6;
+    ctx.beginPath();
+    ctx.ellipse(rand() * TILE, rand() * TILE, r, r * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (let i = 0; i < 48; i++) {
+    const light = rand() > 0.45;
+    ctx.fillStyle = light ? `rgba(235,225,235,${0.18 + rand() * 0.22})` : `rgba(30,25,35,${0.2 + rand() * 0.25})`;
+    ctx.fillRect(rand() * TILE, rand() * TILE, 1, 1);
+  }
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = `rgba(200,150,150,${0.12 + rand() * 0.15})`;
+    ctx.fillRect(rand() * TILE, rand() * TILE, 1.4, 1.4);
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.1)";
+  ctx.fillRect(0, 0, TILE, 2);
+  ctx.fillRect(0, 0, 2, TILE);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(0, TILE - 2, TILE, 2);
+  ctx.fillRect(TILE - 2, 0, 2, TILE);
+}
+
 function paintTunnel(
   ctx: CanvasRenderingContext2D,
   rand: () => number,
@@ -313,6 +364,8 @@ export function makeTileTextures(): TileTextures {
   paint(TileId.Rock, (ctx, r) => paintRock(ctx, r, TILE_DEFS[TileId.Rock].color));
   paint(TileId.Empty, (ctx, r, v) => paintTunnel(ctx, r, TILE_DEFS[TileId.Empty].color, v % 2 === 1));
   paint(TileId.Lava, (ctx, r) => paintLava(ctx, r));
+  paint(TileId.Stone, (ctx, r) => paintStone(ctx, r, TILE_DEFS[TileId.Stone].color));
+  paint(TileId.Granite, (ctx, r) => paintGranite(ctx, r, TILE_DEFS[TileId.Granite].color));
   for (const tile of [
     TileId.Ironium,
     TileId.Bronzium,

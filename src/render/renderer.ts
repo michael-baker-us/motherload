@@ -5,7 +5,7 @@ import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
-import { hardnessScaleAt, TILE_DEFS, TileId } from "../game/tiles";
+import { hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
@@ -487,7 +487,11 @@ export class Renderer {
           continue;
         }
 
-        const variants = this.textures.get(tile);
+        // A gas pocket disguises itself as the surrounding stratum, so it can't
+        // be spotted by eye — the trap only springs when you drill it.
+        const texTile =
+          tile === TileId.GasPocket ? stratumAt(ty - game.world.surfaceRow) : tile;
+        const variants = this.textures.get(texTile);
         if (variants) {
           const v = Math.floor(hash2d(tx, ty, 7) * TILE_VARIANTS) % TILE_VARIANTS;
           // Half-pixel bleed hides antialiasing seams at fractional zoom offsets.

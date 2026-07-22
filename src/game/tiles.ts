@@ -11,9 +11,13 @@ export enum TileId {
   Goldium,
   Einsteinium,
   Diamond,
-  GasPocket, // renders exactly like dirt — a hidden trap that explodes when dug
+  GasPocket, // renders like the surrounding stratum — a hidden trap that explodes when dug
   Lava, // visible hazard; drilling through it burns the hull
   Anomaly, // the vertical-slice objective: a glowing beacon in a crafted cavern
+  // Diggable strata (appended so existing tile ids / saves stay stable). The
+  // filler material changes with depth: topsoil dirt → stone → granite.
+  Stone,
+  Granite,
 }
 
 export interface TileDef {
@@ -43,7 +47,27 @@ export const TILE_DEFS: Record<TileId, TileDef> = {
   [TileId.Lava]: { name: "lava", color: "#ff5a1f", solid: true, hardness: 0.3, value: 0, cargoUnits: 0 },
   // Undiggable landmark — a permanent beacon, drawn specially by the renderer.
   [TileId.Anomaly]: { name: "anomaly", color: "#9ff0ff", solid: true, hardness: null, value: 0, cargoUnits: 0 },
+  // Diggable strata — deeper materials are tougher (hardness still ×depth-scale).
+  [TileId.Stone]: { name: "stone", color: "#6b625a", solid: true, hardness: 0.34, value: 0, cargoUnits: 0 },
+  [TileId.Granite]: { name: "granite", color: "#8f8894", solid: true, hardness: 0.6, value: 0, cargoUnits: 0 },
 };
+
+/**
+ * The diggable filler material by depth. Ordered shallow→deep; the first stratum
+ * whose `maxDepth` isn't exceeded wins. Worldgen wavers the boundary with noise
+ * so the transitions read as natural bands, not hard lines. Kept shallow so the
+ * ~150 m demo stays mostly dirt/stone — granite is the deep endless-game rock.
+ */
+export const STRATA: Array<{ tile: TileId; maxDepth: number }> = [
+  { tile: TileId.Dirt, maxDepth: 60 },
+  { tile: TileId.Stone, maxDepth: 250 },
+  { tile: TileId.Granite, maxDepth: Infinity },
+];
+
+export function stratumAt(depth: number): TileId {
+  for (const s of STRATA) if (depth <= s.maxDepth) return s.tile;
+  return TileId.Granite;
+}
 
 /**
  * Where each mineral spawns. Depth is in tiles below the surface row.
