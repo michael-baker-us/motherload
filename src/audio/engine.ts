@@ -36,6 +36,8 @@ export class AudioEngine {
   private readonly storage: SaveStorage | null;
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Continuous loops route through this so a big one-shot can duck them. */
+  private loopBus: GainNode | null = null;
   private thrust: LoopVoice | null = null;
   private drill: sfx.DrillVoice | null = null;
   private wind: LoopVoice | null = null;
@@ -143,9 +145,11 @@ export class AudioEngine {
         sfx.playPickup(ctx, out);
         break;
       case "impact":
+        this.duck(ctx.currentTime, 0.5, 0.16);
         sfx.playImpact(ctx, out, e.power ?? 0);
         break;
       case "explosion":
+        this.duck(ctx.currentTime, 0.3, 0.22);
         sfx.playExplosion(ctx, out);
         break;
       case "upgrade":
@@ -163,6 +167,15 @@ export class AudioEngine {
   /** Ease a loop's gain toward `target`; loops sit silent at 0 between uses. */
   private setLoop(voice: LoopVoice | null, target: number, now: number, tc = 0.08): void {
     voice?.gain.gain.setTargetAtTime(target, now, tc);
+  }
+
+  /** Dip the loop bus to `to`, then recover toward 1 — sidechain ducking. */
+  private duck(now: number, to: number, release: number): void {
+    const g = this.loopBus?.gain;
+    if (!g) return;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(to, now);
+    g.setTargetAtTime(1, now + 0.03, release);
   }
 
   private ensureContext(): void {
@@ -183,12 +196,29 @@ export class AudioEngine {
 
     const master = ctx.createGain();
     master.gain.value = 0; // frame() ramps it to the configured volume
-    master.connect(ctx.destination);
+
+    // Limiter after the volume control: transparent at normal levels, catches
+    // peaks when sounds stack (explosion + drill + thrust) so they compress
+    // instead of clipping into harsh digital distortion.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    master.connect(limiter).connect(ctx.destination);
     this.master = master;
+
+    // Loops sit behind one-shots: they route through a duck bus that big hits
+    // dip momentarily, so an explosion or crash punches through the grind.
+    const loopBus = ctx.createGain();
+    loopBus.gain.value = 1;
+    loopBus.connect(master);
+    this.loopBus = loopBus;
 
     // Continuous voices run forever at gain 0; frame() opens them as needed.
     this.thrust = this.makeNoiseLoop("bandpass", 480, 0.9);
-    this.drill = sfx.buildDrillVoice(ctx, master);
+    this.drill = sfx.buildDrillVoice(ctx, loopBus);
     this.wind = this.makeNoiseLoop("bandpass", 300, 0.4);
     this.rumble = this.makeNoiseLoop("lowpass", 90, 1);
   }
@@ -204,7 +234,7 @@ export class AudioEngine {
     filter.frequency.value = freq;
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    src.connect(filter).connect(gain).connect(this.master!);
+    src.connect(filter).connect(gain).connect(this.loopBus!);
     src.start();
     return { gain, filter };
   }
