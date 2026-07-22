@@ -82,6 +82,11 @@ export class Renderer {
   private drillRecoil = 0;
   private lastDigDX = 0;
   private lastDigDY = 1;
+  // Screen transitions: a black fade that eases out on arrival in the world,
+  // and a timer that paces the death screen's reveal instead of popping it.
+  private prevState = "";
+  private fade = 0;
+  private deathT = 0;
 
   constructor() {
     this.textures = makeTileTextures();
@@ -98,6 +103,18 @@ export class Renderer {
     this.time += dt;
     this.frameDt = dt;
 
+    // Fade up from black when arriving in the world (new game or respawn) so
+    // the cut into play isn't abrupt; time the death screen's reveal.
+    if (this.prevState !== game.state) {
+      if (game.state === "playing" && (this.prevState === "title" || this.prevState === "dead")) {
+        this.fade = 1;
+      }
+      this.deathT = 0;
+      this.prevState = game.state;
+    }
+    this.fade = Math.max(0, this.fade - dt * 3);
+    if (game.state === "dead") this.deathT += dt;
+
     const cam = game.camera;
     const p = game.player;
     const px = lerp(p.prevX, p.x, alpha);
@@ -110,8 +127,18 @@ export class Renderer {
     cam.resize(screenW / ZOOM, screenH / ZOOM);
 
     // Camera: aim ahead of the pod's velocity, then ease toward the target.
-    const lookX = clamp(p.vx * 0.3, -80, 80);
-    const lookY = clamp(p.vy * 0.22, -45, 70);
+    let lookX = clamp(p.vx * 0.3, -80, 80);
+    let lookY = clamp(p.vy * 0.22, -45, 70);
+    // While drilling, lead the camera past the tile being cut so you see what
+    // you're about to break into (ore or lava) instead of digging blind — the
+    // pod is grounded and still, so velocity look-ahead alone reveals nothing.
+    if (p.hasDigTarget && game.state === "playing") {
+      const podCol = Math.floor((p.x + p.width / 2) / TILE);
+      const podRow = Math.floor((p.y + p.height / 2) / TILE);
+      if (p.digTargetY > podRow) lookY = Math.max(lookY, 58);
+      else if (p.digTargetX < podCol) lookX = Math.min(lookX, -56);
+      else if (p.digTargetX > podCol) lookX = Math.max(lookX, 56);
+    }
     cam.follow(
       px + p.width / 2 + lookX,
       py + p.height / 2 + lookY,
@@ -186,7 +213,13 @@ export class Renderer {
       },
       dt,
     );
-    if (game.state === "dead") this.drawDeathScreen(ctx, game);
+    if (game.state === "dead") this.drawDeathScreen(ctx, game, this.deathT);
+
+    // Arrival fade, over everything including the HUD.
+    if (this.fade > 0) {
+      ctx.fillStyle = `rgba(6,4,10,${this.fade.toFixed(3)})`;
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
   }
 
   // --- Effects -------------------------------------------------------------
@@ -1097,21 +1130,28 @@ export class Renderer {
     ctx.font = "14px monospace";
   }
 
-  private drawDeathScreen(ctx: CanvasRenderingContext2D, game: Game): void {
+  private drawDeathScreen(ctx: CanvasRenderingContext2D, game: Game, t: number): void {
     const viewWidth = ctx.canvas.clientWidth;
     const viewHeight = ctx.canvas.clientHeight;
-    ctx.fillStyle = "rgba(10,2,0,0.72)";
+    // Reveal over a beat so the loss lands; the prompt waits a moment longer so
+    // it isn't mashed past before the player registers what happened.
+    const reveal = clamp(t / 0.5, 0, 1);
+    const promptIn = clamp((t - 0.7) / 0.4, 0, 1);
+    ctx.fillStyle = `rgba(10,2,0,${(0.72 * reveal).toFixed(3)})`;
     ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.textBaseline = "top";
+    ctx.globalAlpha = reveal;
     ctx.fillStyle = "#e04a3a";
     ctx.font = "bold 30px monospace";
-    center(ctx, "POD LOST", viewWidth, viewHeight * 0.4);
+    center(ctx, "POD LOST", viewWidth, viewHeight * 0.4 - (1 - reveal) * 12);
     ctx.fillStyle = "#ffffff";
     ctx.font = "15px monospace";
     center(ctx, game.deathCause, viewWidth, viewHeight * 0.4 + 46);
     center(ctx, `Salvage fee $${game.salvageFeeDue} · cargo and supplies lost`, viewWidth, viewHeight * 0.4 + 70);
+    ctx.globalAlpha = promptIn;
     ctx.fillStyle = "#ffe97a";
     center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 106);
+    ctx.globalAlpha = 1;
     ctx.font = "14px monospace";
   }
 }
