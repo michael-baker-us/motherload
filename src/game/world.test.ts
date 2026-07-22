@@ -136,17 +136,35 @@ describe("coherent worldgen", () => {
     expect(rate).toBeGreaterThan(areaFraction * 4);
   });
 
-  it("never generates a fully undiggable row (descent is always possible)", () => {
-    // An undiggable band spanning the whole interior width would soft-lock the
-    // descent, so every interior row must keep at least one diggable tile.
+  it("never generates a fully impassable row (descent is always possible)", () => {
+    // A row soft-locks the descent only if every interior tile is solid AND
+    // undiggable (all rock). A tile you can dig, or air you can fly through,
+    // keeps the row passable — so caves count as passage, not a blockage.
+    const passable = (w: World, x: number, y: number): boolean =>
+      !w.isSolid(x, y) || w.isDiggable(x, y);
     for (const seed of [1, 42, 2024]) {
       const w = makeWorld(seed);
       for (let y = SURFACE; y < w.height - 1; y++) {
-        let diggable = 0;
-        for (let x = 1; x < w.width - 1; x++) if (w.isDiggable(x, y)) diggable++;
-        expect(diggable, `row ${y} (seed ${seed}) is fully blocked`).toBeGreaterThan(0);
+        let open = 0;
+        for (let x = 1; x < w.width - 1; x++) if (passable(w, x, y)) open++;
+        expect(open, `row ${y} (seed ${seed}) is fully blocked`).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("carves open caverns that grow more common with depth", () => {
+    const w = makeWorld();
+    const airInBand = (from: number, to: number): number => {
+      let air = 0;
+      for (let y = SURFACE + from; y < SURFACE + to; y++) {
+        for (let x = 1; x < w.width - 1; x++) if (w.getTile(x, y) === TileId.Empty) air++;
+      }
+      return air;
+    };
+    // The intro zone stays solid; deep bands open up.
+    expect(airInBand(0, 20)).toBe(0);
+    expect(airInBand(600, 900)).toBeGreaterThan(airInBand(40, 340));
+    expect(airInBand(600, 900)).toBeGreaterThan(100);
   });
 });
 

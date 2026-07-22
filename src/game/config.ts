@@ -47,11 +47,18 @@ export const WORLDGEN = {
   veinFillMax: 0.96, // fill chance at a vein's core
   veinAreaScale: 1, // global multiplier on vein area (density knob)
   // Rock is undiggable, so it's kept deliberately near-speckle — coherent rock
-  // masses risk an impassable full-width band. Real rock/cave structure (with
-  // guaranteed vertical passages) belongs to the caves pass.
+  // masses risk an impassable full-width band.
   rockFreq: 0.16,
   rockSharp: 3,
   rockCap: 3,
+  // Carved air caverns, growing roomier with depth so the world opens up and
+  // feels more mysterious the deeper you go. Air is always traversable, so
+  // caves relieve the descent rather than blocking it.
+  caveFreq: 0.11, // ~9-tile caverns
+  caveMinDepth: 28, // no caves in the intro zone
+  caveThresholdNear: 0.82, // sparse just below the intro zone
+  caveThresholdDeep: 0.6, // roomy caverns deep down
+  caveDepthFull: 800, // depth at which caves reach full density
 };
 
 export const DRILL = {

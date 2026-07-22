@@ -1,3 +1,4 @@
+import { clamp } from "../engine/math";
 import { WORLDGEN } from "./config";
 import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { fbm2d, fieldMeanPow, fieldSamples, tailThreshold } from "./noise";
@@ -13,6 +14,7 @@ const GAS_DRAW = 0xc2b2ae35;
 const LAVA_DRAW = 0x27d4eb2f;
 const VEIN_FIELD = 0x165667b1;
 const VEIN_DRAW = 0xd3a2646c;
+const CAVE_FIELD = 0x1b873593;
 
 /**
  * The terrain: a flat Uint8Array of TileIds, row-major. At 60×2000 that's
@@ -29,6 +31,7 @@ export class World {
   // Seeds and normalisers for coherent placement, all derived from `seed`.
   private readonly rockFieldSeed: number;
   private readonly veinFieldSeed: number;
+  private readonly caveFieldSeed: number;
   private readonly rockNorm: number;
   /** Empirical CDF of the vein field — turns a target area into a mask threshold. */
   private readonly veinCdf: Float64Array;
@@ -46,6 +49,7 @@ export class World {
 
     this.rockFieldSeed = seed ^ ROCK_FIELD;
     this.veinFieldSeed = seed ^ VEIN_FIELD;
+    this.caveFieldSeed = seed ^ CAVE_FIELD;
     // Normalise the placement weights so biasing ore/rock toward high field
     // values leaves the average spawn density equal to the chance curves.
     // The fBm field is stationary, so one estimate serves every mineral band.
@@ -91,6 +95,17 @@ export class World {
     if (x === 0 || x === this.width - 1 || y === this.height - 1) return TileId.Rock;
 
     const depth = y - this.surfaceRow;
+
+    // Caves: carve air where a broad, low-frequency field peaks. The threshold
+    // eases down with depth so caverns grow roomier further from the surface,
+    // and there are none in the intro zone. Air overrides rock and ore, so
+    // caves read as open chambers whose walls you can still mine.
+    if (depth >= WORLDGEN.caveMinDepth) {
+      const t = clamp((depth - WORLDGEN.caveMinDepth) / WORLDGEN.caveDepthFull, 0, 1);
+      const threshold = WORLDGEN.caveThresholdNear + (WORLDGEN.caveThresholdDeep - WORLDGEN.caveThresholdNear) * t;
+      const cave = fbm2d(x * WORLDGEN.caveFreq, y * WORLDGEN.caveFreq, this.caveFieldSeed);
+      if (cave > threshold) return TileId.Empty;
+    }
 
     const rockBase = rockChanceAt(depth);
     if (rockBase > 0) {
