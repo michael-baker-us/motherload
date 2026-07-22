@@ -25,6 +25,18 @@ interface Particle {
   additive: boolean;
 }
 
+/** A rising, fading reward number (e.g. "+$120") anchored to a world point. */
+interface FloatText {
+  x: number;
+  y: number;
+  vy: number;
+  text: string;
+  color: string;
+  size: number;
+  life: number;
+  maxLife: number;
+}
+
 const MAX_PARTICLES = 400;
 const ZOOM = VIEW.zoom;
 
@@ -62,6 +74,7 @@ export class Renderer {
   private readonly motes: { ox: number; oy: number; phase: number }[] = [];
 
   private particles: Particle[] = [];
+  private floats: FloatText[] = [];
   private shake = 0;
   private flash = 0;
   private darkness = 0;
@@ -164,6 +177,7 @@ export class Renderer {
     this.consumeFx(game.fxEvents);
     this.emitContinuousFx(game, px, py);
     this.updateParticles(dt);
+    this.updateFloats(dt);
     // Tremor while the drill bites, building as the tile is about to give so
     // the break has something to release. Decaying shake and recoil otherwise.
     if (p.hasDigTarget && game.state === "playing") {
@@ -183,6 +197,7 @@ export class Renderer {
     this.drawFuse(ctx, game, cam.x, cam.y);
     this.drawPod(ctx, game, px - cam.x, py - cam.y);
     this.drawParticles(ctx, game);
+    this.drawFloats(ctx, cam);
     this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
     ctx.restore();
 
@@ -262,6 +277,14 @@ export class Renderer {
       } else if (e.kind === "upgrade") {
         this.burst(e.x, e.y, 20, "#ffe97a", 140, -40, true);
         this.burst(e.x, e.y, 8, "#ffffff", 90, -40, true);
+        this.spawnFloat(e.x, e.y - 6, "★ UPGRADED", "#ffe97a", 14);
+      } else if (e.kind === "pickup" && e.value) {
+        // A floating "+$" in the mineral's colour previews what it's worth.
+        this.spawnFloat(e.x, e.y, `+$${e.value}`, e.color ?? "#ffe97a", 12);
+      } else if (e.kind === "sell" && e.value) {
+        // Cashing in: a fountain of gold coins and a bold total.
+        this.burst(e.x, e.y, 16, "#ffd75e", 150, -70, true);
+        this.spawnFloat(e.x, e.y - 8, `+$${e.value.toLocaleString()}`, "#ffe07a", 18);
       }
     }
     events.length = 0;
@@ -359,6 +382,44 @@ export class Renderer {
       if (pass) ctx.globalCompositeOperation = "source-over";
     }
     ctx.globalAlpha = 1;
+  }
+
+  private spawnFloat(x: number, y: number, text: string, color: string, size = 12): void {
+    if (this.floats.length >= 32) this.floats.shift();
+    const life = 1.1 + size * 0.02;
+    this.floats.push({ x, y, vy: -32, text, color, size, life, maxLife: life });
+  }
+
+  private updateFloats(dt: number): void {
+    for (const f of this.floats) {
+      f.life -= dt;
+      f.y += f.vy * dt;
+      f.vy *= 1 - dt * 1.4; // ease the rise to a drift
+    }
+    this.floats = this.floats.filter((f) => f.life > 0);
+  }
+
+  /** Reward numbers, drawn in the (zoomed) world pass with a dark outline. */
+  private drawFloats(ctx: CanvasRenderingContext2D, cam: { x: number; y: number }): void {
+    if (this.floats.length === 0) return;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    for (const f of this.floats) {
+      const t = clamp(f.life / f.maxLife, 0, 1);
+      const sx = f.x - cam.x;
+      const sy = f.y - cam.y;
+      ctx.globalAlpha = Math.min(1, t * 1.6); // fade only near the end
+      ctx.font = `bold ${f.size}px ui-monospace, monospace`;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.strokeText(f.text, sx, sy);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, sx, sy);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
   }
 
   /** The objective beacon: a pulsing faceted crystal with an additive halo. */

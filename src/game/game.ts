@@ -50,6 +50,8 @@ export interface FxEvent {
   y: number;
   color?: string;
   power?: number;
+  /** Cash amount for the floating "+$" reward pop (pickup value / sale total). */
+  value?: number;
 }
 
 /** Interval between surface autosaves while the pod is parked topside. */
@@ -284,7 +286,13 @@ export class Game {
         if (TILE_DEFS[dug].value > 0) {
           if (addToCargo(p.cargo, dug, p.cargoCapacity)) {
             this.showToast(`+ ${TILE_DEFS[dug].name}`, 1.2);
-            this.pushFx({ kind: "pickup", x: cx, y: cy });
+            this.pushFx({
+              kind: "pickup",
+              x: cx,
+              y: cy,
+              color: TILE_DEFS[dug].color,
+              value: TILE_DEFS[dug].value,
+            });
           } else {
             this.showToast("CARGO FULL — mineral lost", 2);
           }
@@ -471,7 +479,7 @@ export class Game {
     this.money += total;
     p.cargo.clear();
     this.soldCargo = true;
-    this.pushFx({ kind: "sell", x: p.x + p.width / 2, y: p.y + p.height / 2 });
+    this.pushFx({ kind: "sell", x: p.x + p.width / 2, y: p.y + p.height / 2, value: total });
     return total;
   }
 
