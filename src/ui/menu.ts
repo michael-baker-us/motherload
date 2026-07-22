@@ -35,14 +35,17 @@ export class MenuOverlay {
 
     const panel = document.createElement("div");
     panel.style.cssText =
-      "position:relative;background:rgba(16,19,26,0.82);backdrop-filter:blur(12px);color:#e8e8e8;" +
-      "border:1px solid rgba(255,255,255,0.14);border-radius:14px;" +
-      "box-shadow:0 18px 50px rgba(0,0,0,0.55);padding:22px 26px;min-width:340px;";
+      "position:relative;background:rgba(16,19,26,0.86);backdrop-filter:blur(14px);color:#e8e8e8;" +
+      "border:1px solid rgba(255,255,255,0.14);border-radius:16px;" +
+      "box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:20px 24px;width:320px;" +
+      // fade/slide in on open (slide skipped under reduced-motion)
+      "opacity:0;transition:opacity .18s ease, transform .18s ease;" +
+      (viewPrefs.reducedMotion ? "" : "transform:translateY(10px) scale(0.985);");
 
     const title = document.createElement("div");
-    title.textContent = "SETTINGS";
+    title.textContent = "⏸  PAUSED";
     title.style.cssText =
-      "font-size:18px;font-weight:bold;margin-bottom:12px;letter-spacing:1px;";
+      "font-size:15px;font-weight:bold;margin-bottom:6px;letter-spacing:2px;color:#cdd6e6;";
     panel.appendChild(title);
     panel.appendChild(this.closeButton());
 
@@ -51,11 +54,16 @@ export class MenuOverlay {
 
     const hint = document.createElement("div");
     hint.textContent = "[Esc] resume";
-    hint.style.cssText = "margin-top:14px;color:#888;font-size:12px;";
+    hint.style.cssText = "margin-top:16px;color:#7f8ba3;font-size:11px;letter-spacing:0.5px;";
     panel.appendChild(hint);
 
     root.appendChild(panel);
     document.body.appendChild(root);
+    // Trigger the entrance transition on the next frame.
+    requestAnimationFrame(() => {
+      panel.style.opacity = "1";
+      panel.style.transform = "none";
+    });
     window.addEventListener("keydown", this.keyHandler);
 
     this.root = root;
@@ -78,40 +86,48 @@ export class MenuOverlay {
     if (!this.body) return;
     this.body.replaceChildren();
 
-    this.button(`View: ${viewPrefs.depth ? "2.5D" : "Flat"}`, "#3d5a80", () => {
+    const ON = "#2f6f9a";
+    const OFF = "#33404f";
+
+    this.section("Display");
+    this.button(`◧  View  ·  ${viewPrefs.depth ? "2.5D" : "Flat"}`, viewPrefs.depth ? ON : OFF, () => {
       toggleDepthView(window.localStorage);
       this.render(game);
     });
-
-    this.button(`Reduce shake & flash: ${viewPrefs.reducedMotion ? "ON" : "OFF"}`, "#3d5a80", () => {
-      toggleReducedMotion(window.localStorage);
-      this.render(game);
-    });
+    this.button(
+      `✦  Reduce shake & flash  ·  ${viewPrefs.reducedMotion ? "ON" : "OFF"}`,
+      viewPrefs.reducedMotion ? ON : OFF,
+      () => {
+        toggleReducedMotion(window.localStorage);
+        this.render(game);
+      },
+    );
 
     const audio = activeAudio();
     if (audio) {
       const s = audio.settings;
-      const volLabel = s.muted ? "muted" : `${Math.round(s.volume * 100)}%`;
+      this.section("Audio");
       this.buttonRow([
-        [`Sound: ${s.muted ? "OFF" : "ON"}`, s.muted ? "#7a3040" : "#3d5a80", () => {
+        [`${s.muted ? "🔇" : "🔊"}  Sound  ·  ${s.muted ? "OFF" : "ON"}`, s.muted ? "#7a3040" : ON, () => {
           audio.toggleMuted();
           this.render(game);
         }],
-        ["Vol −", "#3d5a80", () => {
+        ["–", OFF, () => {
           audio.nudgeVolume(-1);
           this.render(game);
         }],
-        ["Vol +", "#3d5a80", () => {
+        ["+", OFF, () => {
           audio.nudgeVolume(1);
           this.render(game);
         }],
       ]);
-      this.line(`volume ${volLabel}`, "#888");
+      this.line(`volume ${s.muted ? "muted" : `${Math.round(s.volume * 100)}%`}`, "#7f8ba3");
     }
 
+    this.section("Dev · Testing");
     for (const [cheat, label] of CHEAT_LABELS) {
       const on = game.cheats[cheat];
-      this.button(`${label}: ${on ? "ON" : "OFF"}`, on ? "#c9762e" : "#2e7d32", () => {
+      this.button(`⚙  ${label}  ·  ${on ? "ON" : "OFF"}`, on ? "#c9762e" : OFF, () => {
         game.toggleCheat(cheat);
         this.render(game);
       });
@@ -119,23 +135,30 @@ export class MenuOverlay {
     this.line(
       game.devMode
         ? "⚠ cheats active · progress will NOT be saved"
-        : "dev cheats for testing — any active cheat disables saving",
-      game.devMode ? "#ffb060" : "#888",
+        : "any active cheat disables saving",
+      game.devMode ? "#ffb060" : "#7f8ba3",
     );
-
-    // Test shortcut: jump straight to the objective depth to try the payoff.
-    this.button("◈ Warp to anomaly depth (dev)", "#3a5a9a", () => {
+    this.button("◈  Warp to anomaly depth", "#3a5a9a", () => {
       game.devWarpToGoal();
       this.close(); // resume so the arrival + payoff play out
     });
-
-    // Live pace readout for tuning the balance by feel.
-    this.button(`Telemetry: ${game.showTelemetry ? "ON" : "OFF"}`, "#3a5a9a", () => {
+    this.button(`▦  Telemetry  ·  ${game.showTelemetry ? "ON" : "OFF"}`, game.showTelemetry ? ON : OFF, () => {
       game.showTelemetry = !game.showTelemetry;
       this.render(game);
     });
 
-    this.button("Resume", "#3d5a80", () => this.close());
+    this.section("");
+    this.button("▶  Resume", "#2e7d46", () => this.close());
+  }
+
+  /** A small uppercase group heading. */
+  private section(title: string): void {
+    const h = document.createElement("div");
+    h.textContent = title.toUpperCase();
+    h.style.cssText =
+      `margin:${title ? "16px" : "18px"} 0 7px;font-size:9px;letter-spacing:2.5px;` +
+      "color:#6f7a91;font-weight:bold;";
+    this.body?.appendChild(h);
   }
 
   private line(text: string, color: string): void {

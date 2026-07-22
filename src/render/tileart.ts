@@ -154,11 +154,79 @@ function paintTunnel(
   }
 }
 
+type OreShape = "needle" | "shard" | "chunk" | "cube" | "hex" | "gem";
+
+/**
+ * A distinct crystal silhouette per mineral, so ores are told apart by SHAPE,
+ * not just colour — a colour-blindness / low-vision safeguard (and richer art).
+ */
+const ORE_FORMS: Partial<Record<TileId, { shape: OreShape; count: number; scale: number }>> = {
+  [TileId.Ironium]: { shape: "chunk", count: 5, scale: 1 }, // squat metallic lumps
+  [TileId.Bronzium]: { shape: "needle", count: 8, scale: 1 }, // fine spikes
+  [TileId.Silverium]: { shape: "shard", count: 6, scale: 1 }, // classic kite shards
+  [TileId.Goldium]: { shape: "cube", count: 4, scale: 1 }, // boxy nuggets
+  [TileId.Einsteinium]: { shape: "hex", count: 4, scale: 1 }, // hexagonal cells
+  [TileId.Diamond]: { shape: "gem", count: 1, scale: 2.3 }, // one big brilliant
+};
+
+/** Path a unit crystal of the given shape, centred at the origin, scaled by s. */
+function oreShapePath(ctx: CanvasRenderingContext2D, shape: OreShape, s: number): void {
+  ctx.beginPath();
+  if (shape === "needle") {
+    ctx.moveTo(0, -7 * s);
+    ctx.lineTo(1.2 * s, 0);
+    ctx.lineTo(0, 3 * s);
+    ctx.lineTo(-1.2 * s, 0);
+  } else if (shape === "shard") {
+    ctx.moveTo(0, -5.5 * s);
+    ctx.lineTo(2.4 * s, 0);
+    ctx.lineTo(0, 2.5 * s);
+    ctx.lineTo(-2.4 * s, 0);
+  } else if (shape === "gem") {
+    ctx.moveTo(0, -7 * s);
+    ctx.lineTo(5 * s, -1.5 * s);
+    ctx.lineTo(0, 7 * s);
+    ctx.lineTo(-5 * s, -1.5 * s);
+  } else if (shape === "cube") {
+    ctx.rect(-3.2 * s, -3.2 * s, 6.4 * s, 6.4 * s); // boxy, obviously not a diamond
+  } else if (shape === "chunk") {
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.3;
+      const rr = (3 + (i % 2) * 0.9) * s;
+      const x = Math.cos(a) * rr;
+      const y = Math.sin(a) * rr * 0.78; // squashed, blobby
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+  } else {
+    // hex
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      i ? ctx.lineTo(Math.cos(a) * 4 * s, Math.sin(a) * 4 * s) : ctx.moveTo(Math.cos(a) * 4 * s, Math.sin(a) * 4 * s);
+    }
+  }
+  ctx.closePath();
+}
+
+/** A single facetted crystal: dark backing, colour body, bright facet dot. */
+function drawOre(ctx: CanvasRenderingContext2D, shape: OreShape, s: number, color: string): void {
+  ctx.fillStyle = shade(color, 0.4);
+  oreShapePath(ctx, shape, s * 1.18);
+  ctx.fill();
+  ctx.fillStyle = color;
+  oreShapePath(ctx, shape, s);
+  ctx.fill();
+  ctx.fillStyle = shade(color, 1.85);
+  ctx.beginPath();
+  ctx.arc(-1.2 * s, -1.7 * s, 1.0 * s, 0, Math.PI * 2); // facet highlight, top-left
+  ctx.fill();
+}
+
 function paintMineral(
   ctx: CanvasRenderingContext2D,
   rand: () => number,
   dirtBase: string,
   color: string,
+  tile: TileId,
 ): void {
   paintDirtBase(ctx, rand, dirtBase);
 
@@ -169,39 +237,16 @@ function paintMineral(
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, TILE, TILE);
 
-  // Crystal shards clustered around the center.
-  const shards = 5 + Math.floor(rand() * 3);
-  for (let i = 0; i < shards; i++) {
-    const cx = 9 + rand() * 14;
-    const cy = 9 + rand() * 14;
-    const len = 4.5 + rand() * 4.5;
-    const w = 2 + rand() * 1.8;
+  const form = ORE_FORMS[tile] ?? { shape: "shard" as OreShape, count: 6, scale: 1 };
+  const upright = form.shape === "gem" || form.shape === "hex" || form.shape === "cube";
+  for (let i = 0; i < form.count; i++) {
+    const cx = form.count === 1 ? 16 : 9 + rand() * 14;
+    const cy = form.count === 1 ? 16 : 9 + rand() * 14;
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(rand() * Math.PI * 2);
-
-    const kite = (scale: number): void => {
-      ctx.beginPath();
-      ctx.moveTo(0, -len * scale);
-      ctx.lineTo(w * scale, 0);
-      ctx.lineTo(0, len * 0.45 * scale);
-      ctx.lineTo(-w * scale, 0);
-      ctx.closePath();
-    };
-    ctx.fillStyle = shade(color, 0.4);
-    kite(1.25);
-    ctx.fill();
-    ctx.fillStyle = color;
-    kite(1);
-    ctx.fill();
-    // Facet highlight on one flank.
-    ctx.fillStyle = shade(color, 1.7);
-    ctx.beginPath();
-    ctx.moveTo(0, -len);
-    ctx.lineTo(-w, 0);
-    ctx.lineTo(0, 0);
-    ctx.closePath();
-    ctx.fill();
+    // Boxy/faceted forms stay near-upright so their shape reads; spiky ones spin.
+    ctx.rotate(upright ? (rand() - 0.5) * 0.6 : rand() * Math.PI * 2);
+    drawOre(ctx, form.shape, form.scale * (0.8 + rand() * 0.5), color);
     ctx.restore();
   }
 }
@@ -276,7 +321,7 @@ export function makeTileTextures(): TileTextures {
     TileId.Einsteinium,
     TileId.Diamond,
   ]) {
-    paint(tile, (ctx, r) => paintMineral(ctx, r, dirtBase, TILE_DEFS[tile].color));
+    paint(tile, (ctx, r) => paintMineral(ctx, r, dirtBase, TILE_DEFS[tile].color, tile));
   }
   // Gas pockets are the trap: pixel-identical to dirt.
   textures.set(TileId.GasPocket, textures.get(TileId.Dirt)!);
