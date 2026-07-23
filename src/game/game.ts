@@ -372,7 +372,7 @@ export class Game {
 
   applyDamage(amount: number, cause: string): void {
     if (this.state !== "playing" || this.cheats.noDamage) return;
-    this.player.hull -= amount;
+    this.player.hull -= amount * (1 - this.player.shield); // shields absorb a fraction
     if (this.player.hull <= 0) {
       this.player.hull = 0;
       this.die(cause);
@@ -592,6 +592,9 @@ export class Game {
     p.maxFuel = currentTier("tank", this.upgrades).value;
     p.cargoCapacity = currentTier("cargo", this.upgrades).value;
     p.maxHull = currentTier("hull", this.upgrades).value;
+    p.engineMult = currentTier("engine", this.upgrades).value;
+    p.scanRange = currentTier("scanner", this.upgrades).value;
+    p.shield = currentTier("shield", this.upgrades).value;
   }
 
   /** What losing the pod right now would cost — shown on the death screen. */

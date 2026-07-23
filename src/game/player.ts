@@ -31,6 +31,12 @@ export interface Player {
   cargoCapacity: number;
   hull: number;
   maxHull: number;
+  /** Engine upgrade: multiplier on thrust, steering, and top speed. */
+  engineMult: number;
+  /** Scanner upgrade: ore-reveal radius in tiles (0 = no scanner). */
+  scanRange: number;
+  /** Shield upgrade: fraction of hazard/impact damage absorbed (0–1). */
+  shield: number;
   /** Consumables ride in the pod — lost with it, unlike money and upgrades. */
   items: Inventory;
 }
@@ -70,6 +76,9 @@ export function createPlayer(world: World): Player {
     cargoCapacity: ECONOMY.cargoCapacity,
     hull: HULL.base,
     maxHull: HULL.base,
+    engineMult: 1,
+    scanRange: 0,
+    shield: 0,
     items: createInventory(),
   };
 }

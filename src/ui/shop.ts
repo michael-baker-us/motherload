@@ -11,6 +11,9 @@ const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
   tank: (v) => `${v} fuel`,
   cargo: (v) => `${v} units`,
   hull: (v) => `${v} HP`,
+  engine: (v) => `×${v} speed`,
+  scanner: (v) => (v > 0 ? `${v}-tile range` : "none"),
+  shield: (v) => (v > 0 ? `${Math.round(v * 100)}% resist` : "none"),
 };
 
 /**

@@ -19,21 +19,23 @@ export function stepPlayer(p: Player, world: World, input: MoveInput, dt: number
   p.prevY = p.y;
   p.impactSpeed = 0;
 
+  // Engine upgrade scales steering, thrust, and top speed (not gravity/fall).
+  const eng = p.engineMult;
   if (input.moveLeft && !input.moveRight) {
-    p.vx -= PHYSICS.hAccel * dt;
+    p.vx -= PHYSICS.hAccel * eng * dt;
     p.facing = -1;
   } else if (input.moveRight && !input.moveLeft) {
-    p.vx += PHYSICS.hAccel * dt;
+    p.vx += PHYSICS.hAccel * eng * dt;
     p.facing = 1;
   } else {
     p.vx *= Math.exp(-PHYSICS.hDrag * dt);
     if (Math.abs(p.vx) < 1) p.vx = 0;
   }
-  if (input.thrustUp) p.vy -= PHYSICS.thrust * dt;
+  if (input.thrustUp) p.vy -= PHYSICS.thrust * eng * dt;
   p.vy += PHYSICS.gravity * dt;
 
-  p.vx = clamp(p.vx, -PHYSICS.maxVx, PHYSICS.maxVx);
-  p.vy = clamp(p.vy, -PHYSICS.maxRise, PHYSICS.maxFall);
+  p.vx = clamp(p.vx, -PHYSICS.maxVx * eng, PHYSICS.maxVx * eng);
+  p.vy = clamp(p.vy, -PHYSICS.maxRise * eng, PHYSICS.maxFall);
 
   p.touchingLeft = false;
   p.touchingRight = false;

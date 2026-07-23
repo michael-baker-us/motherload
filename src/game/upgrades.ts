@@ -4,7 +4,7 @@
  *   drill → dig-speed multiplier · tank → max fuel · cargo → bay units · hull → max HP
  */
 
-export type UpgradeTrack = "drill" | "tank" | "cargo" | "hull";
+export type UpgradeTrack = "drill" | "tank" | "cargo" | "hull" | "engine" | "scanner" | "shield";
 
 export interface UpgradeTier {
   name: string;
@@ -37,18 +37,34 @@ export const UPGRADES: Record<UpgradeTrack, UpgradeTier[]> = {
     { name: "Titanium hull", cost: 700, value: 90 },
     { name: "Nanoweave hull", cost: 2800, value: 150 },
   ],
+  // value = speed/agility multiplier on thrust, steering, and top speed.
+  engine: [
+    { name: "Stock engine", cost: 0, value: 1 },
+    { name: "Tuned engine", cost: 180, value: 1.25 },
+    { name: "Turbo engine", cost: 650, value: 1.5 },
+    { name: "Ion engine", cost: 2400, value: 1.9 },
+  ],
+  // value = reveal radius in tiles; ore within it shows through rock and dark.
+  scanner: [
+    { name: "No scanner", cost: 0, value: 0 },
+    { name: "Short scanner", cost: 220, value: 5 },
+    { name: "Long scanner", cost: 800, value: 9 },
+    { name: "Deep scanner", cost: 2600, value: 14 },
+  ],
+  // value = fraction of hazard/impact damage absorbed.
+  shield: [
+    { name: "No shield", cost: 0, value: 0 },
+    { name: "Ablative shield", cost: 300, value: 0.25 },
+    { name: "Plated shield", cost: 1000, value: 0.45 },
+    { name: "Aegis shield", cost: 3000, value: 0.65 },
+  ],
 };
 
 /** Owned tier index per track. */
-export interface UpgradeState {
-  drill: number;
-  tank: number;
-  cargo: number;
-  hull: number;
-}
+export type UpgradeState = Record<UpgradeTrack, number>;
 
 export function createUpgradeState(): UpgradeState {
-  return { drill: 0, tank: 0, cargo: 0, hull: 0 };
+  return { drill: 0, tank: 0, cargo: 0, hull: 0, engine: 0, scanner: 0, shield: 0 };
 }
 
 export function currentTier(track: UpgradeTrack, state: UpgradeState): UpgradeTier {

@@ -103,10 +103,15 @@ export function parseSave(json: string): SaveData | null {
     ) {
       return null;
     }
+    if (typeof data.upgrades !== "object" || data.upgrades === null) return null;
     for (const track of Object.keys(UPGRADES) as UpgradeTrack[]) {
-      const tier = data.upgrades?.[track];
-      if (typeof tier !== "number") return null;
-      data.upgrades[track] = Math.min(Math.max(0, Math.floor(tier)), UPGRADES[track].length - 1);
+      const tier = (data.upgrades as Record<string, unknown>)[track];
+      // A track added after this save was written defaults to tier 0, so older
+      // saves keep loading as new upgrade categories are introduced.
+      data.upgrades[track] =
+        typeof tier === "number"
+          ? Math.min(Math.max(0, Math.floor(tier)), UPGRADES[track].length - 1)
+          : 0;
     }
     return data;
   } catch {

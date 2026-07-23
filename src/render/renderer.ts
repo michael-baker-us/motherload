@@ -220,6 +220,7 @@ export class Renderer {
     this.drawVignette(ctx, screenW, screenH);
     // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
     if (this.flash > 0 && !viewPrefs.reducedMotion) this.drawFlash(ctx, screenW, screenH);
+    this.drawScanner(ctx, game); // reveals ore within scanner range, over the dark
 
     if (game.state === "title") {
       this.drawTitleScreen(ctx, game);
@@ -1243,6 +1244,39 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  /** Scanner upgrade: mark ore within range, pulsing through rock and darkness. */
+  private drawScanner(ctx: CanvasRenderingContext2D, game: Game): void {
+    const p = game.player;
+    if (p.scanRange <= 0 || game.state !== "playing") return;
+    const cam = game.camera;
+    const podCol = Math.floor((p.x + p.width / 2) / TILE);
+    const podRow = Math.floor((p.y + p.height / 2) / TILE);
+    const R = Math.round(p.scanRange);
+    const pulse = 0.55 + 0.45 * Math.sin(this.time * 3);
+    ctx.save();
+    ctx.scale(ZOOM, ZOOM);
+    ctx.globalCompositeOperation = "lighter";
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        if (dx * dx + dy * dy > R * R) continue;
+        const tx = podCol + dx;
+        const ty = podRow + dy;
+        const tile = game.world.getTile(tx, ty);
+        if (TILE_DEFS[tile].value <= 0) continue;
+        const sx = tx * TILE - cam.x + TILE / 2;
+        const sy = ty * TILE - cam.y + TILE / 2;
+        ctx.globalAlpha = 0.4 + pulse * 0.4;
+        ctx.fillStyle = TILE_DEFS[tile].color;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.restore();
   }
 
   /** Dev pace readout for balance tuning (toggled in the menu). */

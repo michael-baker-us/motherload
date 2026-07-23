@@ -163,6 +163,26 @@ describe("game state machine", () => {
     expect(game.player.fuel).toBe(160);
   });
 
+  it("applies the new upgrade tracks to the pod", () => {
+    const game = makeGame();
+    game.money = 100000;
+    expect(game.buyUpgrade("engine")).toBe(true);
+    expect(game.player.engineMult).toBeCloseTo(1.25);
+    expect(game.buyUpgrade("scanner")).toBe(true);
+    expect(game.player.scanRange).toBe(5);
+    expect(game.buyUpgrade("shield")).toBe(true);
+    expect(game.player.shield).toBeCloseTo(0.25);
+  });
+
+  it("shields absorb a fraction of damage", () => {
+    const game = makeGame();
+    game.money = 100000;
+    game.buyUpgrade("shield"); // 25% resist
+    const hull = game.player.hull;
+    game.applyDamage(20, "test");
+    expect(game.player.hull).toBeCloseTo(hull - 15); // 20 × (1 − 0.25)
+  });
+
   it("refuses upgrades when broke or maxed", () => {
     const game = makeGame();
     game.money = 0;
