@@ -18,6 +18,11 @@ const PAD_CHORDS = [
 ];
 const CHORD_SECONDS = 5;
 
+/** Stereo pan in [-1, 1] for a world-x relative to the listener; ±1 at halfWidth away. */
+export function panFor(worldX: number, listenerX: number, halfWidth: number): number {
+  return Math.max(-1, Math.min(1, (worldX - listenerX) / Math.max(1, halfWidth)));
+}
+
 let active: AudioEngine | null = null;
 
 /** The engine main.ts registered, if any — how DOM overlays reach audio controls. */
@@ -59,6 +64,9 @@ export class AudioEngine {
   private chordIdx = 0;
   private chordTimer = CHORD_SECONDS;
   private arpTimer = 3;
+  // Listener position for stereo panning of one-shots, refreshed each frame.
+  private listenerX = 0;
+  private listenerHalfW = 400;
 
   constructor(settings: AudioSettings, storage: SaveStorage | null = null) {
     this.settings = settings;
@@ -121,9 +129,13 @@ export class AudioEngine {
     const level = this.settings.muted ? 0 : this.settings.volume * this.settings.volume;
     this.master.gain.setTargetAtTime(level, now, 0.06);
 
+    // Listener for stereo panning — set before one-shots fire this frame.
+    const p = game.player;
+    this.listenerX = p.x + p.width / 2;
+    this.listenerHalfW = Math.max(200, game.camera.viewWidth / 2);
+
     for (const e of game.fxEvents) this.playFx(e);
 
-    const p = game.player;
     const playing = game.state === "playing";
 
     this.setLoop(this.thrust, playing && game.isThrusting ? 0.16 : 0, now);
@@ -133,9 +145,12 @@ export class AudioEngine {
     // Ambient beds crossfade with depth: wind topside, rumble down deep.
     const depth = game.depth;
     this.setLoop(this.wind, Math.max(0, 1 - depth / 12) * 0.045, now, 0.4);
-    // Rumble bed intensity flavoured by biome (magma roars, topsoil is quiet).
+    // Rumble bed flavoured by biome — intensity and tone (magma roars bright,
+    // the deep is a low sub-drone).
+    const biome = biomeAt(depth);
     const rumbleBase = Math.min(1, Math.max(0, (depth - 8) / 30)) * 0.06;
-    this.setLoop(this.rumble, rumbleBase * biomeAt(depth).rumble, now, 0.4);
+    this.setLoop(this.rumble, rumbleBase * biome.rumble, now, 0.4);
+    this.rumble?.filter.frequency.setTargetAtTime(biome.rumbleFreq, now, 0.6);
     // Musical pad: clearly present at the surface (above the wind bed),
     // swelling further as you descend.
     if (this.pad) {
@@ -172,11 +187,21 @@ export class AudioEngine {
     }
   }
 
+  /** A short-lived stereo panner into the master, positioned by world-x. */
+  private panned(worldX: number): AudioNode {
+    const ctx = this.ctx!;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = panFor(worldX, this.listenerX, this.listenerHalfW);
+    pan.connect(this.master!);
+    setTimeout(() => pan.disconnect(), 2500); // longer than any one-shot's tail
+    return pan;
+  }
+
   private playFx(e: FxEvent): void {
     const ctx = this.ctx;
-    const out = this.master;
-    if (!ctx || !out) return;
+    if (!ctx || !this.master) return;
     this.playedCount++;
+    const out = this.panned(e.x); // positioned in the stereo field
     switch (e.kind) {
       case "dug":
         sfx.playDug(ctx, out, e.tile);
