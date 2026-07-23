@@ -17,6 +17,7 @@ import {
   REPAIR_KIT_HP,
   type ItemId,
 } from "./items";
+import { isModuleId, MAX_MODULE_SLOTS, MODULES, type ModuleId } from "./modules";
 import { createPlayer, spawnPoint, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import {
@@ -80,6 +81,9 @@ export class Game {
   state: GameState = "title";
   /** Owned upgrade tiers — survive pod loss, unlike the pod itself. */
   readonly upgrades: UpgradeState = createUpgradeState();
+  /** Modules owned and the (≤ MAX_MODULE_SLOTS) currently equipped. Persist like upgrades. */
+  ownedModules = new Set<ModuleId>();
+  equippedModules: ModuleId[] = [];
   /** Why the pod was lost — shown on the death screen. */
   deathCause = "";
   toast: { text: string; timeLeft: number; total: number } | null = null;
@@ -144,7 +148,7 @@ export class Game {
   }
 
   get drillPower(): number {
-    return DRILL.basePower * currentTier("drill", this.upgrades).value;
+    return DRILL.basePower * currentTier("drill", this.upgrades).value * this.moduleMult("drillMult");
   }
 
   startNewGame(): void {
@@ -165,6 +169,10 @@ export class Game {
     this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, data.seed, TILE);
     applyWorldSave(this.world, data);
     Object.assign(this.upgrades, data.upgrades);
+    this.ownedModules = new Set((data.modules?.owned ?? []).filter(isModuleId));
+    this.equippedModules = (data.modules?.equipped ?? [])
+      .filter(isModuleId)
+      .slice(0, MAX_MODULE_SLOTS);
     this.money = data.money;
     const pod = createPlayer(this.world);
     this.applyUpgrades(pod);
@@ -189,7 +197,10 @@ export class Game {
   saveNow(): void {
     // Dev-mode sessions must never touch the real save.
     if (!this.storage || this.devMode) return;
-    const data = captureSave(this.world, this.player, this.money, this.upgrades);
+    const data = captureSave(this.world, this.player, this.money, this.upgrades, {
+      owned: [...this.ownedModules],
+      equipped: [...this.equippedModules],
+    });
     writeSave(this.storage, data);
     this.pendingSave = data;
   }
@@ -310,6 +321,7 @@ export class Game {
     let burn = p.grounded ? 0 : FUEL.idleBurn;
     if (this.thrusting) burn += FUEL.thrustBurn;
     if (p.hasDigTarget) burn += FUEL.digBurn;
+    burn *= this.moduleMult("burnMult"); // Fuel Recycler module trims this
     p.fuel = Math.max(0, p.fuel - burn * dt);
     if (p.fuel <= 0) {
       this.die("Out of fuel");
@@ -394,6 +406,40 @@ export class Game {
       y: this.player.y + this.player.height / 2,
     });
     return true;
+  }
+
+  /** Buy (permanently own) a module. False if already owned or unaffordable. */
+  buyModule(id: ModuleId): boolean {
+    if (this.ownedModules.has(id) || this.money < MODULES[id].cost) return false;
+    this.money -= MODULES[id].cost;
+    this.ownedModules.add(id);
+    this.showToast(`${MODULES[id].name} acquired`, 2);
+    return true;
+  }
+
+  /** Equip/unequip an owned module. False if not owned or all slots are full. */
+  toggleModule(id: ModuleId): boolean {
+    if (!this.ownedModules.has(id)) return false;
+    const at = this.equippedModules.indexOf(id);
+    if (at >= 0) {
+      this.equippedModules.splice(at, 1);
+    } else if (this.equippedModules.length < MAX_MODULE_SLOTS) {
+      this.equippedModules.push(id);
+    } else {
+      return false; // no free slot
+    }
+    this.applyUpgrades(this.player);
+    return true;
+  }
+
+  /** Sum a numeric bonus across equipped modules. */
+  private moduleSum(key: "cargoBonus" | "shieldBonus" | "scanBonus"): number {
+    return this.equippedModules.reduce((s, id) => s + MODULES[id][key], 0);
+  }
+
+  /** Product of a multiplier across equipped modules. */
+  moduleMult(key: "drillMult" | "burnMult"): number {
+    return this.equippedModules.reduce((m, id) => m * MODULES[id][key], 1);
   }
 
   /** Buy one of a consumable at the trader. False if broke or carrying the max. */
@@ -590,11 +636,11 @@ export class Game {
   /** Push owned upgrade values onto a pod (capacities, not current levels). */
   private applyUpgrades(p: Player): void {
     p.maxFuel = currentTier("tank", this.upgrades).value;
-    p.cargoCapacity = currentTier("cargo", this.upgrades).value;
+    p.cargoCapacity = currentTier("cargo", this.upgrades).value + this.moduleSum("cargoBonus");
     p.maxHull = currentTier("hull", this.upgrades).value;
     p.engineMult = currentTier("engine", this.upgrades).value;
-    p.scanRange = currentTier("scanner", this.upgrades).value;
-    p.shield = currentTier("shield", this.upgrades).value;
+    p.scanRange = currentTier("scanner", this.upgrades).value + this.moduleSum("scanBonus");
+    p.shield = Math.min(0.9, currentTier("shield", this.upgrades).value + this.moduleSum("shieldBonus"));
   }
 
   /** What losing the pod right now would cost — shown on the death screen. */

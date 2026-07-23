@@ -1,6 +1,7 @@
 import { FUEL, HULL } from "../game/config";
 import { cargoValue, refuelPlan } from "../game/economy";
 import { ITEM_ORDER, ITEMS } from "../game/items";
+import { MAX_MODULE_SLOTS, MODULE_ORDER, MODULES } from "../game/modules";
 import type { Station } from "../game/stations";
 import { TILE_DEFS } from "../game/tiles";
 import { currentTier, nextTier, UPGRADES, type UpgradeTrack } from "../game/upgrades";
@@ -179,6 +180,30 @@ export class ShopOverlay {
         this.render(station, game);
       },
     );
+
+    // Modules: own any, equip up to MAX_MODULE_SLOTS — a loadout tradeoff.
+    this.line("");
+    this.line(`MODULES  (${game.equippedModules.length}/${MAX_MODULE_SLOTS} equipped)`);
+    for (const id of MODULE_ORDER) {
+      const def = MODULES[id];
+      const equipped = game.equippedModules.includes(id);
+      if (!game.ownedModules.has(id)) {
+        this.button(`${def.name} — ${def.blurb} — $${def.cost}`, game.money >= def.cost, () => {
+          game.buyModule(id);
+          this.render(station, game);
+        });
+      } else {
+        const canToggle = equipped || game.equippedModules.length < MAX_MODULE_SLOTS;
+        this.button(
+          `${equipped ? "◧ equipped" : "○ equip"} · ${def.name} — ${def.blurb}`,
+          canToggle,
+          () => {
+            game.toggleModule(id);
+            this.render(station, game);
+          },
+        );
+      }
+    }
   }
 
   private line(text: string): void {

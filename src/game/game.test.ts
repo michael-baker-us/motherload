@@ -174,6 +174,57 @@ describe("game state machine", () => {
     expect(game.player.shield).toBeCloseTo(0.25);
   });
 
+  it("owns and equips modules within the slot limit, applying effects", () => {
+    const game = makeGame();
+    game.money = 100000;
+    expect(game.buyModule("compactor")).toBe(true);
+    expect(game.buyModule("compactor")).toBe(false); // already owned
+    const baseCargo = game.player.cargoCapacity;
+    expect(game.toggleModule("compactor")).toBe(true); // equip
+    expect(game.player.cargoCapacity).toBe(baseCargo + 6);
+
+    game.buyModule("turbo");
+    game.toggleModule("turbo"); // second slot
+    game.buyModule("recycler");
+    expect(game.toggleModule("recycler")).toBe(false); // both slots full
+
+    expect(game.toggleModule("compactor")).toBe(true); // unequip frees a slot
+    expect(game.player.cargoCapacity).toBe(baseCargo);
+    expect(game.toggleModule("recycler")).toBe(true); // now it fits
+  });
+
+  it("modules multiply drill power and fuel burn", () => {
+    const game = makeGame();
+    game.money = 100000;
+    const baseDrill = game.drillPower;
+    game.buyModule("turbo");
+    game.toggleModule("turbo");
+    expect(game.drillPower).toBeCloseTo(baseDrill * 1.25);
+    game.buyModule("recycler");
+    game.toggleModule("recycler");
+    expect(game.moduleMult("burnMult")).toBeCloseTo(0.8);
+  });
+
+  it("can't equip a module it doesn't own", () => {
+    const game = makeGame();
+    expect(game.toggleModule("turbo")).toBe(false);
+  });
+
+  it("persists owned and equipped modules across save/continue", () => {
+    const storage = fakeStorage();
+    const first = makeGame(storage);
+    first.money = 100000;
+    first.buyModule("turbo");
+    first.toggleModule("turbo");
+    first.buyModule("plating"); // owned, not equipped
+    first.saveNow();
+
+    const second = new Game(800, 600, storage);
+    expect(second.continueGame()).toBe(true);
+    expect([...second.ownedModules].sort()).toEqual(["plating", "turbo"]);
+    expect(second.equippedModules).toEqual(["turbo"]);
+  });
+
   it("shields absorb a fraction of damage", () => {
     const game = makeGame();
     game.money = 100000;

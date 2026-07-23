@@ -57,6 +57,8 @@ export interface SaveData {
   };
   money: number;
   upgrades: UpgradeState;
+  /** Owned/equipped module ids. Absent in pre-module saves → treated as empty. */
+  modules?: { owned: string[]; equipped: string[] };
 }
 
 export function captureSave(
@@ -64,6 +66,7 @@ export function captureSave(
   player: Player,
   money: number,
   upgrades: UpgradeState,
+  modules: { owned: string[]; equipped: string[] } = { owned: [], equipped: [] },
 ): SaveData {
   return {
     version: CURRENT_SAVE_VERSION,
@@ -79,6 +82,7 @@ export function captureSave(
     },
     money,
     upgrades: { ...upgrades },
+    modules: { owned: [...modules.owned], equipped: [...modules.equipped] },
   };
 }
 
@@ -113,6 +117,15 @@ export function parseSave(json: string): SaveData | null {
           ? Math.min(Math.max(0, Math.floor(tier)), UPGRADES[track].length - 1)
           : 0;
     }
+    // Modules are optional (absent in older saves) and validated leniently.
+    const m = data.modules;
+    data.modules =
+      m && Array.isArray(m.owned) && Array.isArray(m.equipped)
+        ? {
+            owned: m.owned.filter((x) => typeof x === "string"),
+            equipped: m.equipped.filter((x) => typeof x === "string"),
+          }
+        : { owned: [], equipped: [] };
     return data;
   } catch {
     return null;
