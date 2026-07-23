@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SLICE } from "./config";
 import { STATIONS } from "./stations";
-import { digClass, MINERAL_BANDS, stratumAt, TileId } from "./tiles";
+import { digClass, MINERAL_BANDS, richestOreAt, stratumAt, TileId } from "./tiles";
 import { World } from "./world";
 
 const SURFACE = 6;
@@ -211,6 +211,29 @@ describe("material strata", () => {
     expect(digClass(TileId.Stone)).toBe("mid");
     expect(digClass(TileId.Granite)).toBe("hard");
     expect(digClass(TileId.Diamond)).toBe("hard");
+  });
+});
+
+describe("environmental set-pieces", () => {
+  it("richestOreAt returns the top-value legal mineral for a depth", () => {
+    expect(richestOreAt(0)).toBeNull(); // no band at the very surface
+    expect(richestOreAt(10)).toBe(TileId.Ironium);
+    expect(richestOreAt(400)).toBe(TileId.Goldium); // richest of the bands live at 400m
+    expect(richestOreAt(1500)).toBe(TileId.Diamond);
+  });
+
+  it("stamps lava chambers (molten pools) in the magma band", () => {
+    const w = makeWorld();
+    let longestLavaRun = 0;
+    for (let y = SURFACE + 250; y < SURFACE + 700; y++) {
+      let run = 0;
+      for (let x = 1; x < w.width - 1; x++) {
+        run = w.getTile(x, y) === TileId.Lava ? run + 1 : 0;
+        longestLavaRun = Math.max(longestLavaRun, run);
+      }
+    }
+    // Natural lava is isolated speckle; a long run only comes from a chamber pool.
+    expect(longestLavaRun).toBeGreaterThanOrEqual(6);
   });
 });
 

@@ -117,6 +117,17 @@ export function digClass(tile: TileId): DigClass {
   return h < 0.32 ? "soft" : h < 0.55 ? "mid" : "hard";
 }
 
+/** The most valuable mineral whose band includes this depth, or null. Used to
+ *  stock set-piece reward pockets with ore that's always legal for its depth. */
+export function richestOreAt(depth: number): TileId | null {
+  let best: MineralBand | null = null;
+  for (const band of MINERAL_BANDS) {
+    if (depth < band.minDepth || depth > band.maxDepth) continue;
+    if (!best || TILE_DEFS[band.tile].value > TILE_DEFS[best.tile].value) best = band;
+  }
+  return best ? best.tile : null;
+}
+
 export function bandChanceAt(band: MineralBand, depth: number): number {
   if (depth < band.minDepth || depth > band.maxDepth) return 0;
   const t = (depth - band.minDepth) / (band.maxDepth - band.minDepth);

@@ -4,7 +4,15 @@ import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { fbm2d, fieldMeanPow, fieldSamples, tailThreshold } from "./noise";
 import { hash2d } from "./rng";
 import { STATIONS } from "./stations";
-import { MINERAL_BANDS, TILE_DEFS, TileId, bandChanceAt, rockChanceAt, stratumAt } from "./tiles";
+import {
+  MINERAL_BANDS,
+  TILE_DEFS,
+  TileId,
+  bandChanceAt,
+  richestOreAt,
+  rockChanceAt,
+  stratumAt,
+} from "./tiles";
 
 // Distinct salts so each field/draw derived from the world seed is decorrelated
 // from the others (rock masses, hazard speckle, and ore veins mustn't align).
@@ -87,7 +95,73 @@ export class World {
         this.tiles[y * this.width + x] = TileId.Rock;
       }
     }
+    this.stampFeatures();
     this.stampAnomaly();
+  }
+
+  // --- Set-pieces ----------------------------------------------------------
+
+  /** Place a tile if it's inside the interior (not the border or station strip). */
+  private set(x: number, y: number, tile: TileId): void {
+    if (x > 0 && x < this.width - 1 && y >= this.surfaceRow + 2 && y < this.height - 1) {
+      this.tiles[y * this.width + x] = tile;
+    }
+  }
+
+  /** Embed the richest depth-legal ore at (x, y) — used to stock reward pockets. */
+  private placeOre(x: number, y: number): void {
+    const ore = richestOreAt(y - this.surfaceRow);
+    if (ore !== null) this.set(x, y, ore);
+  }
+
+  /**
+   * Scatter authored features down the world — deterministic from the seed, like
+   * the anomaly. Which feature appears is chosen by depth (≈ biome): abandoned
+   * mine caches up top, lava chambers in the magma band, crystal caverns deep.
+   */
+  private stampFeatures(): void {
+    for (let d = 120; this.surfaceRow + d < this.height - 6; d += 90) {
+      if (hash2d(d, 7, this.seed) > 0.5) continue; // ~half the slots stay empty
+      const col = 5 + Math.floor(hash2d(d, 11, this.seed) * (this.width - 10));
+      const row = this.surfaceRow + d + Math.floor((hash2d(d, 13, this.seed) - 0.5) * 50);
+      const depth = row - this.surfaceRow;
+      if (Math.abs(depth - SLICE.goalDepth) < 24) continue; // keep clear of the anomaly
+      if (depth >= 250 && depth < 700) this.stampLavaChamber(col, row);
+      else if (depth >= 700) this.stampCrystalCavern(col, row);
+      else this.stampVault(col, row);
+    }
+  }
+
+  /** Abandoned-mine cache: a small room with an ore seam in the floor. */
+  private stampVault(cx: number, cy: number): void {
+    for (let y = cy - 2; y <= cy + 1; y++) {
+      for (let x = cx - 3; x <= cx + 3; x++) this.set(x, y, TileId.Empty);
+    }
+    for (let x = cx - 1; x <= cx + 1; x++) this.placeOre(x, cy + 1);
+  }
+
+  /** Lava chamber: a wide cavern with a molten pool across its floor. */
+  private stampLavaChamber(cx: number, cy: number): void {
+    for (let y = cy - 3; y <= cy; y++) {
+      for (let x = cx - 6; x <= cx + 6; x++) this.set(x, y, TileId.Empty);
+    }
+    for (let x = cx - 5; x <= cx + 5; x++) {
+      this.set(x, cy, TileId.Lava);
+      this.set(x, cy + 1, TileId.Lava);
+    }
+  }
+
+  /** Crystal cavern: a large chamber with a rich ore seam lining the floor. */
+  private stampCrystalCavern(cx: number, cy: number): void {
+    for (let y = cy - 4; y <= cy; y++) {
+      for (let x = cx - 5; x <= cx + 5; x++) this.set(x, y, TileId.Empty);
+    }
+    for (let x = cx - 5; x <= cx + 5; x++) this.placeOre(x, cy + 1);
+    // A couple of crystal clusters jutting from the floor.
+    for (let x = cx - 3; x <= cx + 3; x += 3) {
+      this.placeOre(x, cy);
+      this.placeOre(x, cy - 1);
+    }
   }
 
   /**
