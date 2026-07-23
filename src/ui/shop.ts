@@ -1,6 +1,6 @@
 import { FUEL, HULL } from "../game/config";
 import { cargoValue, refuelPlan } from "../game/economy";
-import { ITEM_ORDER, ITEMS } from "../game/items";
+import { ITEM_ORDER, ITEMS, type ItemId } from "../game/items";
 import { MAX_MODULE_SLOTS, MODULE_ORDER, MODULES, type ModuleId } from "../game/modules";
 import type { Station } from "../game/stations";
 import { TILE_DEFS } from "../game/tiles";
@@ -33,6 +33,13 @@ const MODULE_ICON: Record<ModuleId, string> = {
   recycler: "♻️",
   plating: "🛡",
   probe: "📡",
+};
+
+const ITEM_ICON: Record<ItemId, string> = {
+  dynamite: "🧨",
+  fuelCell: "🔋",
+  repairKit: "🧰",
+  teleporter: "🌀",
 };
 
 /**
@@ -113,58 +120,83 @@ export class ShopOverlay {
     const p = game.player;
     const plan = refuelPlan(p.fuel, p.maxFuel, game.money, FUEL.pricePerUnit);
 
-    this.line(`Fuel  ${Math.floor(p.fuel)} / ${p.maxFuel}`);
-    this.line(`Money $${game.money}`);
-
-    const label =
-      plan.units <= 0
-        ? p.fuel >= p.maxFuel
-          ? "Tank full"
-          : "No money for fuel"
-        : plan.units >= p.maxFuel - p.fuel
-          ? `Refuel to full — $${plan.cost}`
-          : `Refuel +${plan.units} (all you can afford) — $${plan.cost}`;
-
-    this.button(label, plan.units > 0, () => {
-      p.fuel += plan.units;
-      game.money -= plan.cost;
-      this.render(station, game);
+    this.line(`Money  $${game.money.toLocaleString()}`);
+    this.heading("Refuel");
+    this.card({
+      icon: "⛽",
+      title: "REFUEL",
+      sub:
+        plan.units <= 0
+          ? p.fuel >= p.maxFuel
+            ? "tank full"
+            : "not enough money"
+          : plan.units >= p.maxFuel - p.fuel
+            ? "fill the tank"
+            : `+${plan.units} (all you can afford)`,
+      stat: `${Math.floor(p.fuel)} / ${p.maxFuel} fuel`,
+      actionLabel: plan.units > 0 ? `$${plan.cost}` : p.fuel >= p.maxFuel ? "FULL" : "—",
+      enabled: plan.units > 0,
+      onClick:
+        plan.units > 0
+          ? () => {
+              p.fuel += plan.units;
+              game.money -= plan.cost;
+              this.render(station, game);
+            }
+          : undefined,
     });
   }
 
   private renderTrader(station: Station, game: Game): void {
     const p = game.player;
+    this.line(`Money  $${game.money.toLocaleString()}`);
+
+    this.heading("Cargo Bay");
     if (p.cargo.size === 0) {
-      this.line("Cargo bay is empty.");
+      this.line("  empty");
     } else {
       for (const [tile, count] of p.cargo) {
         const def = TILE_DEFS[tile];
-        this.line(`${def.name.padEnd(12)} ×${count}  $${def.value * count}`);
+        this.line(`  ${def.name.padEnd(12)} ×${count}   $${(def.value * count).toLocaleString()}`);
       }
     }
-    this.line(`Money $${game.money}`);
-
     const total = cargoValue(p.cargo);
-    this.button(`Sell all — $${total}`, total > 0, () => {
-      game.sellCargo();
-      this.render(station, game);
+    this.card({
+      icon: "💰",
+      title: "SELL ALL",
+      sub: "cash in the cargo bay",
+      stat: total > 0 ? `+$${total.toLocaleString()}` : "nothing to sell",
+      actionLabel: total > 0 ? `$${total.toLocaleString()}` : "—",
+      enabled: total > 0,
+      onClick:
+        total > 0
+          ? () => {
+              game.sellCargo();
+              this.render(station, game);
+            }
+          : undefined,
     });
 
     // The trader doubles as the supply store — insurance for the trip down.
-    this.line("");
-    this.line("SUPPLIES  (use with keys 1-4)");
+    this.heading("Supplies  ·  use with keys 1–4");
     ITEM_ORDER.forEach((id, i) => {
       const def = ITEMS[id];
       const owned = p.items[id];
       const full = owned >= def.maxStack;
-      this.button(
-        `[${i + 1}] ${def.name} ×${owned} — ${def.blurb} — ${full ? "max carried" : `$${def.cost}`}`,
-        !full && game.money >= def.cost,
-        () => {
-          game.buyItem(id);
-          this.render(station, game);
-        },
-      );
+      this.card({
+        icon: ITEM_ICON[id],
+        title: def.name,
+        sub: def.blurb,
+        stat: `carried ×${owned}  ·  key ${i + 1}`,
+        actionLabel: full ? "MAX" : `$${def.cost}`,
+        enabled: !full && game.money >= def.cost,
+        onClick: full
+          ? undefined
+          : () => {
+              game.buyItem(id);
+              this.render(station, game);
+            },
+      });
     });
   }
 
@@ -331,22 +363,5 @@ export class ShopOverlay {
       "background:rgba(255,255,255,0.08);";
     btn.addEventListener("click", () => this.close());
     return btn;
-  }
-
-  private button(label: string, enabled: boolean, onClick: () => void): void {
-    const btn = document.createElement("button");
-    btn.textContent = label;
-    btn.disabled = !enabled;
-    btn.style.cssText =
-      "display:block;margin-top:10px;padding:9px 16px;font-family:monospace;font-size:14px;" +
-      "cursor:pointer;color:#fff;border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
-      "background:linear-gradient(180deg,#3a9d40,#2a6e2f);transition:filter 0.12s;" +
-      (enabled ? "" : "opacity:0.35;cursor:default;");
-    if (enabled) {
-      btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.2)"));
-      btn.addEventListener("mouseleave", () => (btn.style.filter = ""));
-    }
-    btn.addEventListener("click", onClick);
-    this.body?.appendChild(btn);
   }
 }
