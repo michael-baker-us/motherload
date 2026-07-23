@@ -108,3 +108,17 @@ export const HAZARDS = {
   fallThreshold: 480, // px/s of impact the hull absorbs for free
   fallFactor: 0.08, // HP per px/s beyond the threshold
 };
+
+// Heat: a second resource axis. Depth and the magma biome push heat up; the
+// radiator (and surfacing) pull it down. When gain outpaces cooling the pod
+// overheats and the hull cooks — you can reach the deep, but not linger there.
+export const HEAT = {
+  capacity: 100, // max heat before overheating
+  drillHeat: 5, // units/s added while actively drilling
+  lavaSpike: 22, // one-shot heat added when a lava tile is drilled through
+  baseCooling: 5, // units/s the radiator sheds anywhere
+  surfaceCoolDepth: 10, // within this many tiles of the surface, cooling is boosted
+  surfaceCoolBonus: 22, // extra units/s of cooling in that shallow band
+  overheatDamage: 7, // hull HP/s while heat is pinned at capacity
+  warnFraction: 0.7, // HUD gauge turns to a warning above this fraction
+};

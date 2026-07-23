@@ -4,8 +4,9 @@ import { BIOMES, biomeIndexAt } from "./biomes";
 import type { Input } from "../engine/input";
 import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
-import { DRILL, ECONOMY, FUEL, HULL, SLICE, TILE, WORLD } from "./config";
+import { DRILL, ECONOMY, FUEL, HEAT, HULL, SLICE, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
+import { stepHeat } from "./heat";
 import { addToCargo, cargoUnits, cargoValue, refuelPlan, salvageFeeFor } from "./economy";
 import { Onboarding, type OnboardPrompt } from "./onboarding";
 import { digHazard, fallDamage } from "./hazards";
@@ -297,6 +298,7 @@ export class Game {
       if (hazard) {
         this.showToast(hazard.toast, 2);
         this.pushFx({ kind: "explosion", x: cx, y: cy });
+        if (dug === TileId.Lava) p.heat = Math.min(p.maxHeat, p.heat + HEAT.lavaSpike);
         this.applyDamage(hazard.damage, hazard.cause);
         if (this.state !== "playing") return;
       } else {
@@ -340,6 +342,24 @@ export class Game {
     if (bi > this.deepestBiome) {
       this.deepestBiome = bi;
       this.showToast(`◈  ${BIOMES[bi]!.name}`, 2.5);
+    }
+
+    // Heat: the biome radiates it in, the radiator sheds it; overheating cooks
+    // the hull. No-damage cheat also spares the pod from thermal damage.
+    const wasOverheating = p.heat >= p.maxHeat;
+    const heatStep = stepHeat(dt, {
+      heat: p.heat,
+      maxHeat: p.maxHeat,
+      depth: this.depth,
+      ambient: BIOMES[bi]!.heat,
+      drilling: p.hasDigTarget,
+      coolMult: p.coolMult,
+    });
+    p.heat = heatStep.heat;
+    if (p.heat >= p.maxHeat && !wasOverheating) this.showToast("OVERHEATING!", 2);
+    if (heatStep.overheatDamage > 0) {
+      this.applyDamage(heatStep.overheatDamage, "Hull cooked by overheating");
+      if (this.state !== "playing") return;
     }
     if (!this.goalReached && this.depth >= SLICE.goalDepth) {
       this.reachAnomaly();
@@ -641,6 +661,7 @@ export class Game {
     p.engineMult = currentTier("engine", this.upgrades).value;
     p.scanRange = currentTier("scanner", this.upgrades).value + this.moduleSum("scanBonus");
     p.shield = Math.min(0.9, currentTier("shield", this.upgrades).value + this.moduleSum("shieldBonus"));
+    p.coolMult = currentTier("coolant", this.upgrades).value;
   }
 
   /** What losing the pod right now would cost — shown on the death screen. */

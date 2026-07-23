@@ -1,4 +1,4 @@
-import { ECONOMY, FUEL, HULL, POD, TILE } from "./config";
+import { ECONOMY, FUEL, HEAT, HULL, POD, TILE } from "./config";
 import type { Cargo } from "./economy";
 import { createInventory, type Inventory } from "./items";
 import type { World } from "./world";
@@ -31,6 +31,11 @@ export interface Player {
   cargoCapacity: number;
   hull: number;
   maxHull: number;
+  /** Heat: a second resource axis; overheats and cooks the hull at maxHeat. */
+  heat: number;
+  maxHeat: number;
+  /** Coolant upgrade: radiator cooling multiplier (>= 1). */
+  coolMult: number;
   /** Engine upgrade: multiplier on thrust, steering, and top speed. */
   engineMult: number;
   /** Scanner upgrade: ore-reveal radius in tiles (0 = no scanner). */
@@ -76,6 +81,9 @@ export function createPlayer(world: World): Player {
     cargoCapacity: ECONOMY.cargoCapacity,
     hull: HULL.base,
     maxHull: HULL.base,
+    heat: 0,
+    maxHeat: HEAT.capacity,
+    coolMult: 1,
     engineMult: 1,
     scanRange: 0,
     shield: 0,

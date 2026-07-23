@@ -15,6 +15,7 @@ const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
   engine: (v) => `×${v} speed`,
   scanner: (v) => (v > 0 ? `${v}-tile range` : "none"),
   shield: (v) => (v > 0 ? `${Math.round(v * 100)}% resist` : "none"),
+  coolant: (v) => `×${v} cooling`,
 };
 
 const TRACK_ICON: Record<UpgradeTrack, string> = {
@@ -25,6 +26,7 @@ const TRACK_ICON: Record<UpgradeTrack, string> = {
   engine: "🚀",
   scanner: "📡",
   shield: "🛡",
+  coolant: "❄",
 };
 
 const MODULE_ICON: Record<ModuleId, string> = {

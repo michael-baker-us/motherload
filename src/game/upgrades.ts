@@ -4,7 +4,15 @@
  *   drill → dig-speed multiplier · tank → max fuel · cargo → bay units · hull → max HP
  */
 
-export type UpgradeTrack = "drill" | "tank" | "cargo" | "hull" | "engine" | "scanner" | "shield";
+export type UpgradeTrack =
+  | "drill"
+  | "tank"
+  | "cargo"
+  | "hull"
+  | "engine"
+  | "scanner"
+  | "shield"
+  | "coolant";
 
 export interface UpgradeTier {
   name: string;
@@ -58,13 +66,20 @@ export const UPGRADES: Record<UpgradeTrack, UpgradeTier[]> = {
     { name: "Plated shield", cost: 1000, value: 0.45 },
     { name: "Aegis shield", cost: 3000, value: 0.65 },
   ],
+  // value = cooling multiplier on the radiator; higher tiers let you linger deeper.
+  coolant: [
+    { name: "Stock radiator", cost: 0, value: 1 },
+    { name: "Finned radiator", cost: 260, value: 1.6 },
+    { name: "Coolant loop", cost: 950, value: 2.3 },
+    { name: "Cryo radiator", cost: 2800, value: 3.2 },
+  ],
 };
 
 /** Owned tier index per track. */
 export type UpgradeState = Record<UpgradeTrack, number>;
 
 export function createUpgradeState(): UpgradeState {
-  return { drill: 0, tank: 0, cargo: 0, hull: 0, engine: 0, scanner: 0, shield: 0 };
+  return { drill: 0, tank: 0, cargo: 0, hull: 0, engine: 0, scanner: 0, shield: 0, coolant: 0 };
 }
 
 export function currentTier(track: UpgradeTrack, state: UpgradeState): UpgradeTier {

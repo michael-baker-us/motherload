@@ -242,6 +242,8 @@ export class Renderer {
         maxFuel: p.maxFuel,
         hull: p.hull,
         maxHull: p.maxHull,
+        heat: p.heat,
+        maxHeat: p.maxHeat,
         money: game.money,
         cargoUnits: cargoUnits(p.cargo),
         cargoCapacity: p.cargoCapacity,

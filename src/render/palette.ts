@@ -36,6 +36,7 @@ export const palette = {
   good: "#5fd75f", // fuel, positive
   warn: "#ffb060", // caution — dev/warnings
   danger: "#e04a3a", // damage, low resource, death
+  heat: "#ff7a3c", // heat gauge — warm orange, distinct from the amber cargo bar
 } as const;
 
 /** `palette` colour at a given alpha, e.g. rgba() for glows and strokes. */

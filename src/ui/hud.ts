@@ -1,3 +1,4 @@
+import { HEAT } from "../game/config";
 import { clamp } from "../engine/math";
 import { alpha, palette } from "../render/palette";
 
@@ -7,6 +8,8 @@ export interface HudData {
   maxFuel: number;
   hull: number;
   maxHull: number;
+  heat: number;
+  maxHeat: number;
   money: number;
   cargoUnits: number;
   cargoCapacity: number;
@@ -25,7 +28,7 @@ export interface HudData {
 }
 
 const PANEL_W = 190;
-const PANEL_H = 100;
+const PANEL_H = 118;
 const BAR_X = 66;
 const BAR_W = PANEL_W - BAR_X - 14;
 
@@ -40,6 +43,7 @@ export class Hud {
   private shownMoney = -1;
   private shownFuel = -1;
   private shownHull = -1;
+  private shownHeat = -1;
   private shownBay = -1;
 
   draw(ctx: CanvasRenderingContext2D, data: HudData, dt: number): void {
@@ -49,12 +53,14 @@ export class Hud {
       this.shownMoney = data.money;
       this.shownFuel = data.fuel / data.maxFuel;
       this.shownHull = data.hull / data.maxHull;
+      this.shownHeat = data.heat / data.maxHeat;
       this.shownBay = data.cargoUnits / Math.max(1, data.cargoCapacity);
     }
     this.shownMoney += (data.money - this.shownMoney) * Math.min(1, ease * 1.6);
     if (Math.abs(data.money - this.shownMoney) < 1) this.shownMoney = data.money;
     this.shownFuel += (data.fuel / data.maxFuel - this.shownFuel) * ease;
     this.shownHull += (data.hull / data.maxHull - this.shownHull) * ease;
+    this.shownHeat += (data.heat / data.maxHeat - this.shownHeat) * ease;
     this.shownBay += (data.cargoUnits / Math.max(1, data.cargoCapacity) - this.shownBay) * ease;
 
     ctx.textBaseline = "top";
@@ -90,7 +96,8 @@ export class Hud {
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 7);
     this.bar(ctx, "FUEL", 50, this.shownFuel, data.fuel / data.maxFuel < 0.25, palette.good, pulse);
     this.bar(ctx, "HULL", 68, this.shownHull, data.hull / data.maxHull < 0.25, palette.anomalyDim, pulse);
-    this.bar(ctx, "BAY", 86, this.shownBay, false, palette.amberDim, pulse);
+    this.bar(ctx, "HEAT", 86, this.shownHeat, data.heat / data.maxHeat > HEAT.warnFraction, palette.heat, pulse);
+    this.bar(ctx, "BAY", 104, this.shownBay, false, palette.amberDim, pulse);
 
     // Dev-mode badge under the panel: loud on purpose — saves are off.
     if (data.dev) {
