@@ -45,6 +45,9 @@ export class Hud {
   private shownHull = -1;
   private shownHeat = -1;
   private shownBay = -1;
+  // Money-gain flash: pops when the banked total jumps (a sale), eases out.
+  private lastMoney = -1;
+  private moneyFlash = 0;
 
   draw(ctx: CanvasRenderingContext2D, data: HudData, dt: number): void {
     this.time += dt;
@@ -63,13 +66,27 @@ export class Hud {
     this.shownHeat += (data.heat / data.maxHeat - this.shownHeat) * ease;
     this.shownBay += (data.cargoUnits / Math.max(1, data.cargoCapacity) - this.shownBay) * ease;
 
+    // A jump in the banked total pops the money readout.
+    if (this.lastMoney >= 0 && data.money > this.lastMoney) this.moneyFlash = 1;
+    this.lastMoney = data.money;
+    this.moneyFlash = Math.max(0, this.moneyFlash - dt * 2.4);
+
     ctx.textBaseline = "top";
 
-    // Glass panel.
-    ctx.fillStyle = "rgba(10, 12, 16, 0.66)";
+    // Glass panel: a soft drop shadow lifts it off the (now brighter) world, and
+    // a subtle top-to-bottom tint gives it depth.
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 4;
+    const panelBg = ctx.createLinearGradient(0, 12, 0, 12 + PANEL_H);
+    panelBg.addColorStop(0, "rgba(16, 20, 26, 0.72)");
+    panelBg.addColorStop(1, "rgba(8, 10, 14, 0.72)");
+    ctx.fillStyle = panelBg;
     ctx.beginPath();
     ctx.roundRect(12, 12, PANEL_W, PANEL_H, 12);
     ctx.fill();
+    ctx.restore();
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -78,10 +95,16 @@ export class Hud {
     ctx.roundRect(13, 13, PANEL_W - 2, 16, [11, 11, 0, 0]);
     ctx.fill();
 
-    // Money, ticking toward the real value.
+    // Money, ticking toward the real value; glows warm when it jumps.
+    ctx.save();
+    if (this.moneyFlash > 0) {
+      ctx.shadowColor = palette.moneyGold;
+      ctx.shadowBlur = 12 * this.moneyFlash;
+    }
     ctx.font = `bold 18px ${MONO}`;
     ctx.fillStyle = palette.moneyGold;
     ctx.fillText(`$${Math.round(this.shownMoney).toLocaleString()}`, 24, 22);
+    ctx.restore();
 
     // Depth, right-aligned.
     ctx.font = `bold 8px ${MONO}`;
@@ -258,16 +281,21 @@ export class Hud {
     const fill = clamp(frac, 0, 1);
     if (fill > 0.01) {
       const c = low ? palette.danger : color;
-      // Soft glow underlay, then the crisp fill.
-      ctx.globalAlpha = low ? 0.25 + pulse * 0.3 : 0.28;
+      const fw = BAR_W * fill;
+      // The fill reads as lit: a coloured glow (matching the world's emissive
+      // language) under a crisp bar, topped with a glassy sheen.
+      ctx.save();
+      ctx.shadowColor = c;
+      ctx.shadowBlur = low ? 5 + pulse * 5 : 5;
       ctx.fillStyle = c;
       ctx.beginPath();
-      ctx.roundRect(12 + BAR_X - 1.5, y - 1.5, BAR_W * fill + 3, 10, 5);
+      ctx.roundRect(12 + BAR_X, y, fw, 7, 3.5);
       ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = c;
+      ctx.restore();
+      // Sheen along the top of the fill.
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
       ctx.beginPath();
-      ctx.roundRect(12 + BAR_X, y, BAR_W * fill, 7, 3.5);
+      ctx.roundRect(12 + BAR_X + 0.5, y + 0.5, Math.max(0, fw - 1), 2.4, [2.5, 2.5, 1, 1]);
       ctx.fill();
     }
   }
