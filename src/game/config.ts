@@ -9,6 +9,32 @@ export const VIEW = {
   zoom: 1.6, // world magnification; the HUD stays at native resolution
 };
 
+// --- Rendering / visuals -------------------------------------------------
+// Cosmetic tuning that used to be hard-coded in the renderer. Keeping it here
+// means the game's look is tunable in one place, same as its feel.
+
+/** Depth darkness + the light sources that carve it back open. */
+export const LIGHT = {
+  darkStart: 4, // depth (tiles) where darkness begins ramping in
+  darkRamp: 70, // tiles over which darkness saturates
+  maxDarkness: 0.93, // never fully black — silhouettes stay readable
+  radius: 165, // headlamp / beacon light radius in world px (× zoom on screen)
+  headlampTint: [255, 190, 110] as const, // warm wash inside the lamp halo
+  beaconTint: [120, 230, 255] as const, // cool wash around the objective beacon
+};
+
+/** 2.5D depth pass: cavity projection + flat per-face shading. */
+export const DEPTH = {
+  backScale: 0.85, // how far the cavity back plane recedes toward the view centre
+  face: { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 }, // brightness per face orientation
+};
+
+/** Particle / ambient-effect budgets. */
+export const FX = {
+  maxParticles: 400, // pool cap; the oldest particle is evicted on overflow
+  motes: 22, // dust motes drifting in the headlamp beam
+};
+
 export const WORLD = {
   width: 60, // tiles
   height: 2000, // tiles

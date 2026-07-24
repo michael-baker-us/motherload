@@ -1,5 +1,5 @@
 import { clamp, lerp } from "../engine/math";
-import { SLICE, TILE, VIEW } from "../game/config";
+import { DEPTH, FX, LIGHT, SLICE, TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
@@ -8,6 +8,9 @@ import { STATIONS } from "../game/stations";
 import { biomeAt } from "../game/biomes";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
+import { bakeCrust, bakeEdge, bakeGlow } from "./bake";
+import { Lighting } from "./lighting";
+import { darknessAt, type Emitter, type Light } from "./lights";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
@@ -38,18 +41,7 @@ interface FloatText {
   maxLife: number;
 }
 
-const MAX_PARTICLES = 400;
 const ZOOM = VIEW.zoom;
-
-// Darkness ramps in from this depth (tiles) and saturates over the next DARK_RAMP.
-const DARK_START = 4;
-const DARK_RAMP = 70;
-const LIGHT_RADIUS = 165; // world px; multiplied by ZOOM on screen
-
-// 2.5D view: how far the cavity back plane recedes toward the view centre.
-const BACK_SCALE = 0.85;
-// Flat-shaded lighting per face orientation (multiplies the tile's base color).
-const FACE_LIGHT = { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 };
 
 /**
  * All drawing lives here; Game stays logic-only (and node-testable). The
@@ -62,7 +54,7 @@ export class Renderer {
   private readonly faceColors = new Map<number, string>();
   private readonly sky = new Sky();
   private readonly hud = new Hud();
-  private readonly lightCanvas = document.createElement("canvas");
+  private readonly lighting = new Lighting();
   // Baked overlays: soft tunnel shadows per exposed side, sunlit crust, glows.
   private readonly shadeTop = bakeEdge(0, -1);
   private readonly shadeBottom = bakeEdge(0, 1);
@@ -76,7 +68,15 @@ export class Renderer {
 
   private particles: Particle[] = [];
   private floats: FloatText[] = [];
+  // Emissive glows collected during the world pass, replayed additively after
+  // the darkness so they pierce it; and the lights that carve that darkness.
+  private readonly emitters: Emitter[] = [];
+  private readonly lights: Light[] = [];
   private shake = 0;
+  // One stored shake offset per frame, shared by the world pass and the
+  // emissive replay so additive glows register with the shaken world.
+  private shakeX = 0;
+  private shakeY = 0;
   private flash = 0;
   private darkness = 0;
   private time = 0;
@@ -110,7 +110,7 @@ export class Renderer {
   constructor() {
     this.textures = makeTileTextures();
     const rand = mulberry32(77);
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < FX.motes; i++) {
       this.motes.push({ ox: rand() * 2 - 1, oy: rand() * 2 - 1, phase: rand() * Math.PI * 2 });
     }
   }
@@ -190,23 +190,37 @@ export class Renderer {
     this.drillRecoil = Math.max(0, this.drillRecoil - dt * 7);
     this.flash = Math.max(0, this.flash - dt * 2.2);
 
+    // Depth darkness, computed before the world pass so the pod headlamp glow
+    // and dust motes use this frame's value rather than last frame's.
+    const centerDepth = (cam.y + cam.viewHeight / 2) / TILE - game.world.surfaceRow;
+    this.darkness = darknessAt(centerDepth);
+    const biome = biomeAt(centerDepth);
+
     // Reduced-motion suppresses the screen shake (accessibility/photosensitivity).
+    // Store the offset once so the world pass and the emissive replay share it.
     const shakeMag = viewPrefs.reducedMotion ? 0 : this.shake * this.shake * 22;
+    this.shakeX = (Math.random() - 0.5) * shakeMag;
+    this.shakeY = (Math.random() - 0.5) * shakeMag;
+
+    // The world pass collects emissive glows into these instead of drawing them
+    // inline; they're replayed after the darkness so they pierce it.
+    this.emitters.length = 0;
+    this.lights.length = 0;
+
+    // --- World albedo pass (zoomed + shaken): opaque geometry only ---
     ctx.save();
     ctx.scale(ZOOM, ZOOM);
-    ctx.translate((Math.random() - 0.5) * shakeMag, (Math.random() - 0.5) * shakeMag);
+    ctx.translate(this.shakeX, this.shakeY);
     this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time);
     this.drawTiles(ctx, game);
     this.drawStations(ctx, game);
     this.drawFuse(ctx, game, cam.x, cam.y);
     this.drawPod(ctx, game, px - cam.x, py - cam.y);
-    this.drawParticles(ctx, game);
+    this.drawParticles(ctx, game, false);
     this.drawFloats(ctx, cam);
-    this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
     ctx.restore();
 
     // Biome mood wash over the world (subtle; the fog colour carries the deep).
-    const biome = biomeAt(cam.y / TILE + cam.viewHeight / TILE / 2 - game.world.surfaceRow);
     if (biome.tintAlpha > 0) {
       ctx.globalAlpha = biome.tintAlpha;
       ctx.fillStyle = biome.tint;
@@ -214,9 +228,41 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    const podScreenX = (px - cam.x + p.width / 2) * ZOOM;
-    const podScreenY = (py - cam.y + p.height / 2) * ZOOM;
-    this.applyLighting(ctx, game, podScreenX, podScreenY, screenW, screenH);
+    // --- Lighting: darkness overlay carved by the pod headlamp + beacon ---
+    this.lights.push({
+      x: (px - cam.x + p.width / 2 + this.shakeX) * ZOOM,
+      y: (py - cam.y + p.height / 2 + this.shakeY) * ZOOM,
+      radius: LIGHT.radius * ZOOM,
+      color: LIGHT.headlampTint,
+      intensity: 1,
+      wash: 0.1,
+    });
+    const anom = game.world.anomaly;
+    if (anom) {
+      const ar = LIGHT.radius * ZOOM * (0.85 + 0.15 * Math.sin(this.time * 2));
+      const ax = (anom.x * TILE + TILE / 2 - cam.x + this.shakeX) * ZOOM;
+      const ay = (anom.y * TILE + TILE / 2 - cam.y + this.shakeY) * ZOOM;
+      if (ax > -ar && ax < screenW + ar && ay > -ar && ay < screenH + ar) {
+        this.lights.push({ x: ax, y: ay, radius: ar, color: LIGHT.beaconTint, intensity: 0.9, wash: 0.16 });
+      }
+    }
+    this.lighting.apply(ctx, this.lights, biome.fog, this.darkness, screenW, screenH);
+
+    // --- Emissive pass (zoomed + shaken, additive): glows over the darkness ---
+    ctx.save();
+    ctx.scale(ZOOM, ZOOM);
+    ctx.translate(this.shakeX, this.shakeY);
+    ctx.globalCompositeOperation = "lighter";
+    for (const e of this.emitters) {
+      ctx.globalAlpha = e.alpha;
+      ctx.drawImage(e.sprite, e.x, e.y, e.w, e.h);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    this.drawParticles(ctx, game, true);
+    this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
+    ctx.restore();
+
     this.drawVignette(ctx, screenW, screenH);
     // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
     if (this.flash > 0 && !viewPrefs.reducedMotion) this.drawFlash(ctx, screenW, screenH);
@@ -382,7 +428,7 @@ export class Renderer {
   }
 
   private spawn(particle: Particle): void {
-    if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
+    if (this.particles.length >= FX.maxParticles) this.particles.shift();
     this.particles.push(particle);
   }
 
@@ -396,19 +442,22 @@ export class Renderer {
     this.particles = this.particles.filter((p) => p.life > 0);
   }
 
-  private drawParticles(ctx: CanvasRenderingContext2D, game: Game): void {
+  /**
+   * One particle pass. Non-additive dust draws in the world (albedo) pass;
+   * additive sparks/exhaust draw in the emissive pass so they glow through the
+   * darkness rather than being dimmed by it.
+   */
+  private drawParticles(ctx: CanvasRenderingContext2D, game: Game, additive: boolean): void {
     const cam = game.camera;
-    for (const pass of [false, true] as const) {
-      if (pass) ctx.globalCompositeOperation = "lighter";
-      for (const p of this.particles) {
-        if (p.additive !== pass) continue;
-        ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
-        ctx.fillStyle = p.color;
-        ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
-      }
-      if (pass) ctx.globalCompositeOperation = "source-over";
+    if (additive) ctx.globalCompositeOperation = "lighter";
+    for (const p of this.particles) {
+      if (p.additive !== additive) continue;
+      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
     }
     ctx.globalAlpha = 1;
+    if (additive) ctx.globalCompositeOperation = "source-over";
   }
 
   private spawnFloat(x: number, y: number, text: string, color: string, size = 12): void {
@@ -454,11 +503,8 @@ export class Renderer {
     const cx = sx + TILE / 2;
     const cy = sy + TILE / 2;
     const pulse = 0.6 + 0.4 * Math.sin(this.time * 2.2);
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.5 + pulse * 0.4;
-    ctx.drawImage(this.anomalyGlow, cx - 64, cy - 64);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
+    // Halo is emissive — replayed after the darkness so the beacon reads bright.
+    this.emitters.push({ sprite: this.anomalyGlow, x: cx - 64, y: cy - 64, w: 128, h: 128, alpha: 0.5 + pulse * 0.4 });
 
     const h = 13;
     const w = 9;
@@ -534,12 +580,9 @@ export class Renderer {
         if (!world.isSolid(tx, ty - 1)) ctx.drawImage(this.crust, sx, sy);
 
         if (tile === TileId.Lava) {
+          // Emissive: replayed after the darkness so it glows through the dark.
           const pulse = 0.55 + 0.35 * Math.sin(this.time * 2.5 + hash2d(tx, ty, 3) * 6);
-          ctx.globalCompositeOperation = "lighter";
-          ctx.globalAlpha = pulse;
-          ctx.drawImage(this.lavaGlow, sx + TILE / 2 - 48, sy + TILE / 2 - 48);
-          ctx.globalAlpha = 1;
-          ctx.globalCompositeOperation = "source-over";
+          this.emitters.push({ sprite: this.lavaGlow, x: sx + TILE / 2 - 48, y: sy + TILE / 2 - 48, w: 96, h: 96, alpha: pulse });
         } else if (TILE_DEFS[tile].value > 0) {
           // Occasional glint so ore catches the eye.
           const cycle = (this.time * 0.5 + hash2d(tx, ty, 11) * 7) % 7;
@@ -587,12 +630,8 @@ export class Renderer {
       ctx.drawImage(this.textures.get(TileId.Empty)![0]!, sx, sy, TILE, TILE);
       ctx.globalAlpha = 1;
 
-      // Molten flare where the drill bites.
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.5 + Math.random() * 0.4;
-      ctx.drawImage(this.warmGlow, sx + TILE / 2 - 14, sy + TILE / 2 - 14, 28, 28);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
+      // Molten flare where the drill bites (emissive — replayed after dark).
+      this.emitters.push({ sprite: this.warmGlow, x: sx + TILE / 2 - 14, y: sy + TILE / 2 - 14, w: 28, h: 28, alpha: 0.5 + Math.random() * 0.4 });
     }
   }
 
@@ -613,13 +652,13 @@ export class Renderer {
     const y1 = Math.min(world.height - 1, Math.floor((cam.y + cam.viewHeight) / TILE) + pad);
     const vx = cam.viewWidth / 2;
     const vy = cam.viewHeight / 2;
-    const px = (x: number): number => vx + (x - vx) * BACK_SCALE;
-    const py = (y: number): number => vy + (y - vy) * BACK_SCALE;
+    const px = (x: number): number => vx + (x - vx) * DEPTH.backScale;
+    const py = (y: number): number => vy + (y - vy) * DEPTH.backScale;
 
     // Back walls first: they sit deepest. Projected rects of adjacent tiles
     // stay adjacent (the projection is a similarity), so textures still tile.
     const backVariants = this.textures.get(TileId.Empty)!;
-    const backSize = TILE * BACK_SCALE + 0.5;
+    const backSize = TILE * DEPTH.backScale + 0.5;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         if (world.getTile(tx, ty) !== TileId.Empty) continue;
@@ -638,13 +677,13 @@ export class Renderer {
           const down = world.getTile(tx, ty + 1);
           const left = world.getTile(tx - 1, ty);
           const right = world.getTile(tx + 1, ty);
-          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, FACE_LIGHT.ceiling, px, py);
-          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, FACE_LIGHT.floor, px, py);
-          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, FACE_LIGHT.wall, px, py);
-          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, FACE_LIGHT.wall, px, py);
+          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, DEPTH.face.ceiling, px, py);
+          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, DEPTH.face.floor, px, py);
+          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, DEPTH.face.wall, px, py);
+          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, DEPTH.face.wall, px, py);
         } else if (TILE_DEFS[tile].solid && world.getTile(tx, ty - 1) === TileId.Sky) {
           // Sunlit lip along the surface — the terrain's visible top face.
-          this.face(ctx, sx, sy, sx + TILE, sy, tile, FACE_LIGHT.lip, px, py);
+          this.face(ctx, sx, sy, sx + TILE, sy, tile, DEPTH.face.lip, px, py);
         }
       }
     }
@@ -740,11 +779,8 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(sx + w - 14, sy - 13, 2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = blink * 0.5;
-      ctx.drawImage(this.warmGlow, sx + w - 14 - 10, sy - 13 - 10, 20, 20);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
+      // Antenna beacon glow (emissive — replayed after the darkness).
+      this.emitters.push({ sprite: this.warmGlow, x: sx + w - 14 - 10, y: sy - 13 - 10, w: 20, h: 20, alpha: blink * 0.5 });
 
       // Door with a lit transom, and a glowing window.
       ctx.fillStyle = "rgba(0,0,0,0.5)";
@@ -753,11 +789,8 @@ export class Renderer {
       ctx.fill();
       ctx.fillStyle = "#ffe9a0";
       ctx.fillRect(sx + w / 2 - 7, sy + h - 24, 14, 3);
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.5 + 0.08 * Math.sin(this.time * 1.7 + sx);
-      ctx.drawImage(this.warmGlow, sx + 16 - 20, sy + 27 - 20, 40, 40);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
+      // Window glow (emissive — replayed after the darkness).
+      this.emitters.push({ sprite: this.warmGlow, x: sx + 16 - 20, y: sy + 27 - 20, w: 40, h: 40, alpha: 0.5 + 0.08 * Math.sin(this.time * 1.7 + sx) });
       ctx.fillStyle = "#ffe9a0";
       ctx.beginPath();
       ctx.roundRect(sx + 10, sy + 22, 12, 10, 2);
@@ -890,14 +923,12 @@ export class Renderer {
       sy -= this.lastDigDY * kick;
     }
 
-    // Thruster flame: layered, flickering, glowing.
+    // Thruster flame: layered, flickering, glowing. The soft glow is emissive
+    // (replayed after the darkness); the flame body stays here in the albedo
+    // pass — it sits inside the pod's own headlamp halo, so it reads bright.
     if (game.isThrusting && game.state === "playing") {
       const len = 11 + Math.random() * 6;
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.8;
-      ctx.drawImage(this.warmGlow, sx + w / 2 - 24, sy + h + 2 - 24);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
+      this.emitters.push({ sprite: this.warmGlow, x: sx + w / 2 - 24, y: sy + h + 2 - 24, w: 48, h: 48, alpha: 0.8 });
       ctx.fillStyle = "rgba(255,157,46,0.85)";
       ctx.beginPath();
       ctx.moveTo(sx + w * 0.28, sy + h - 2);
@@ -1070,12 +1101,9 @@ export class Renderer {
     ctx.beginPath();
     ctx.roundRect(lampX - 2, lampY - 2, 4, 4, 1.5);
     ctx.fill();
+    // Headlamp glow (emissive — replayed after the darkness once it's dark enough).
     if (this.darkness > 0.12) {
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = 0.55 * this.darkness;
-      ctx.drawImage(this.warmGlow, lampX - 16, lampY - 16, 32, 32);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
+      this.emitters.push({ sprite: this.warmGlow, x: lampX - 16, y: lampY - 16, w: 32, h: 32, alpha: 0.55 * this.darkness });
     }
   }
 
@@ -1154,86 +1182,10 @@ export class Renderer {
 
   // --- Post ----------------------------------------------------------------
 
-  private applyLighting(
-    ctx: CanvasRenderingContext2D,
-    game: Game,
-    podX: number,
-    podY: number,
-    screenW: number,
-    screenH: number,
-  ): void {
-    const cam = game.camera;
-    const centerDepth = (cam.y + cam.viewHeight / 2) / TILE - game.world.surfaceRow;
-    this.darkness = clamp((centerDepth - DARK_START) / DARK_RAMP, 0, 0.93);
-    if (this.darkness <= 0.01) return;
-
-    const radius = LIGHT_RADIUS * ZOOM;
-    const lc = this.lightCanvas;
-    if (lc.width !== screenW || lc.height !== screenH) {
-      lc.width = screenW;
-      lc.height = screenH;
-    }
-    const lctx = lc.getContext("2d")!;
-    lctx.globalCompositeOperation = "source-over";
-    lctx.clearRect(0, 0, screenW, screenH);
-    // The darkness takes the biome's fog colour — the dominant tint down deep.
-    const fog = biomeAt(centerDepth).fog;
-    lctx.fillStyle = `rgba(${fog[0]},${fog[1]},${fog[2]},${this.darkness})`;
-    lctx.fillRect(0, 0, screenW, screenH);
-
-    // Punch the headlight halo out of the darkness.
-    const grad = lctx.createRadialGradient(podX, podY, 24, podX, podY, radius);
-    grad.addColorStop(0, "rgba(0,0,0,1)");
-    grad.addColorStop(0.6, "rgba(0,0,0,0.75)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    lctx.globalCompositeOperation = "destination-out";
-    lctx.fillStyle = grad;
-    lctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
-
-    // The anomaly lights its own chamber — a second hole in the darkness.
-    const anom = game.world.anomaly;
-    let ax = 0;
-    let ay = 0;
-    let ar = 0;
-    let anomLit = false;
-    if (anom) {
-      ax = (anom.x * TILE + TILE / 2 - cam.x) * ZOOM;
-      ay = (anom.y * TILE + TILE / 2 - cam.y) * ZOOM;
-      ar = radius * (0.85 + 0.15 * Math.sin(this.time * 2));
-      if (ax > -ar && ax < screenW + ar && ay > -ar && ay < screenH + ar) {
-        anomLit = true;
-        const ag = lctx.createRadialGradient(ax, ay, 16, ax, ay, ar);
-        ag.addColorStop(0, "rgba(0,0,0,0.92)");
-        ag.addColorStop(0.6, "rgba(0,0,0,0.55)");
-        ag.addColorStop(1, "rgba(0,0,0,0)");
-        lctx.fillStyle = ag;
-        lctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
-      }
-    }
-
-    ctx.drawImage(lc, 0, 0);
-
-    // Warm tint inside the halo so the light feels like a lamp, not a hole.
-    const warm = ctx.createRadialGradient(podX, podY, 8, podX, podY, radius * 0.55);
-    warm.addColorStop(0, `rgba(255,190,110,${0.1 * this.darkness})`);
-    warm.addColorStop(1, "rgba(255,190,110,0)");
-    ctx.fillStyle = warm;
-    ctx.fillRect(podX - radius, podY - radius, radius * 2, radius * 2);
-
-    // Cool cyan wash from the beacon.
-    if (anomLit) {
-      const cool = ctx.createRadialGradient(ax, ay, 8, ax, ay, ar * 0.6);
-      cool.addColorStop(0, `rgba(120,230,255,${(0.16 * this.darkness).toFixed(3)})`);
-      cool.addColorStop(1, "rgba(120,230,255,0)");
-      ctx.fillStyle = cool;
-      ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
-    }
-  }
-
   /** Slow dust motes drifting through the headlight beam. */
   private drawMotes(ctx: CanvasRenderingContext2D, podX: number, podY: number): void {
     if (this.darkness < 0.15) return;
-    const r = LIGHT_RADIUS * 0.8;
+    const r = LIGHT.radius * 0.8;
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = "#ffd9a0";
     for (const m of this.motes) {
@@ -1538,51 +1490,4 @@ export class Renderer {
 
 function center(ctx: CanvasRenderingContext2D, text: string, viewWidth: number, y: number): void {
   ctx.fillText(text, (viewWidth - ctx.measureText(text).width) / 2, y);
-}
-
-/** Baked soft shadow along one edge of a tunnel tile. (dx,dy) points at the wall. */
-function bakeEdge(dx: number, dy: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE;
-  canvas.height = TILE;
-  const ctx = canvas.getContext("2d")!;
-  const depth = 11;
-  const grad =
-    dy !== 0
-      ? ctx.createLinearGradient(0, dy < 0 ? 0 : TILE, 0, dy < 0 ? depth : TILE - depth)
-      : ctx.createLinearGradient(dx < 0 ? 0 : TILE, 0, dx < 0 ? depth : TILE - depth, 0);
-  grad.addColorStop(0, "rgba(0,0,0,0.4)");
-  grad.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, TILE, TILE);
-  return canvas;
-}
-
-/** Sunlit crust highlight for solid tiles exposed from above. */
-function bakeCrust(): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE;
-  canvas.height = TILE;
-  const ctx = canvas.getContext("2d")!;
-  const grad = ctx.createLinearGradient(0, 0, 0, 7);
-  grad.addColorStop(0, "rgba(255,225,185,0.28)");
-  grad.addColorStop(1, "rgba(255,225,185,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, TILE, 7);
-  return canvas;
-}
-
-/** Radial glow sprite for emissive effects. */
-function bakeGlow(size: number, r: number, g: number, b: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, `rgba(${r},${g},${b},0.8)`);
-  grad.addColorStop(0.4, `rgba(${r},${g},${b},0.28)`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  return canvas;
 }
