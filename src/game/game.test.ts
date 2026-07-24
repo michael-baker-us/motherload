@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { Input } from "../engine/input";
 import { ECONOMY, FUEL, SLICE, TILE } from "./config";
 import { Game } from "./game";
-import { FUEL_CELL_UNITS, ITEMS, REPAIR_KIT_HP } from "./items";
+import { FUEL_CELL_UNITS, ITEM_ORDER, ITEMS, REPAIR_KIT_HP } from "./items";
 import { spawnPoint } from "./player";
 import { TileId } from "./tiles";
+import { UPGRADES, type UpgradeTrack } from "./upgrades";
+import { BIOMES } from "./biomes";
 
 const DT = 1 / 60;
 
@@ -548,5 +550,56 @@ describe("vertical-slice objective", () => {
     expect(game.state).toBe("playing"); // goal marked claimed — no payoff
     expect(game.maxDepth).toBeGreaterThanOrEqual(290);
     expect(game.runStats().depth).toBeGreaterThanOrEqual(SLICE.goalDepth);
+  });
+});
+
+describe("dev tools", () => {
+  it("maxes every upgrade track and taints the run", () => {
+    const game = makeGame();
+    expect(game.devMode).toBe(false);
+    game.devMaxUpgrades();
+    for (const track of Object.keys(UPGRADES) as UpgradeTrack[]) {
+      expect(game.upgrades[track]).toBe(UPGRADES[track].length - 1);
+    }
+    expect(game.devMode).toBe(true); // tainted → HUD badge + no saving
+  });
+
+  it("grants every consumable to its max stack", () => {
+    const game = makeGame();
+    game.devGrantItems();
+    for (const id of ITEM_ORDER) expect(game.player.items[id]).toBe(ITEMS[id].maxStack);
+  });
+
+  it("fills the cargo bay to capacity", () => {
+    const game = makeGame();
+    game.devFillCargo();
+    const units = [...game.player.cargo.values()].reduce((a, b) => a + b, 0);
+    expect(units).toBe(game.player.cargoCapacity);
+  });
+
+  it("never writes the real save once a dev tool has run", () => {
+    const storage = fakeStorage();
+    const game = makeGame(storage);
+    game.devGiveMoney(5000);
+    game.saveNow();
+    expect(storage.getItem("motherload-save")).toBeNull();
+  });
+
+  it("clears the taint on a genuinely fresh game so saving resumes", () => {
+    const storage = fakeStorage();
+    const game = makeGame(storage);
+    game.devGiveMoney(5000);
+    expect(game.devMode).toBe(true);
+    game.startNewGame();
+    expect(game.devMode).toBe(false);
+    expect(storage.getItem("motherload-save")).not.toBeNull(); // startNewGame saved
+  });
+
+  it("noHeat keeps the pod cold in a hot biome", () => {
+    const game = makeGame();
+    game.toggleCheat("noHeat");
+    game.devWarpToDepth(BIOMES[2]!.minDepth + 15); // Magma Depths
+    for (let i = 0; i < 120 && game.state === "playing"; i++) game.update(DT, idleInput);
+    expect(game.player.heat).toBe(0);
   });
 });

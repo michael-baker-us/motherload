@@ -17,6 +17,7 @@ const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFunds", "Unlimited funds"],
   ["noDamage", "No damage"],
   ["digAnything", "Dig anything"],
+  ["noHeat", "No overheating"],
 ];
 
 /**
@@ -177,13 +178,49 @@ export class MenuOverlay {
       }
       this.line(
         game.devMode
-          ? "⚠ cheats active · progress will NOT be saved"
-          : "any active cheat disables saving",
+          ? "⚠ dev tools used · progress will NOT be saved"
+          : "any cheat or dev tool disables saving",
         game.devMode ? "#ffb060" : "#7f8ba3",
       );
+
+      // One-shot grants — re-render so the money/dev badge update in place.
+      this.card({
+        icon: "🔧", title: "Max upgrades", sub: "every track to top tier", actionLabel: "Max",
+        onClick: () => { game.devMaxUpgrades(); this.render(game); },
+      });
+      this.card({
+        icon: "🧩", title: "Grant all modules", sub: "own every loadout module", actionLabel: "Give",
+        onClick: () => { game.devGrantModules(); this.render(game); },
+      });
+      this.card({
+        icon: "🎒", title: "Grant all items", sub: "stock every consumable", actionLabel: "Give",
+        onClick: () => { game.devGrantItems(); this.render(game); },
+      });
+      this.card({
+        icon: "📦", title: "Fill cargo", sub: "assorted ore to sell", actionLabel: "Fill",
+        onClick: () => { game.devFillCargo(); this.render(game); },
+      });
+      this.card({
+        icon: "💰", title: "Give $10,000", sub: "test purchases with real cash", actionLabel: "Give",
+        onClick: () => { game.devGiveMoney(); this.render(game); },
+      });
+      this.card({
+        icon: "⚡", title: "Refill fuel & hull", sub: "top off + clear heat", actionLabel: "Refill",
+        onClick: () => { game.devRefill(); this.render(game); },
+      });
+      this.card({
+        icon: "💥", title: "Kill pod", sub: "trigger the death screen", actionLabel: "Kill", warn: true,
+        onClick: () => { game.devKillPod(); this.close(); },
+      });
+
+      // Warps — close the menu so the arrival plays out.
       this.card({
         icon: "◈", title: "Warp to anomaly", sub: "the objective depth", actionLabel: "Warp",
-        onClick: () => { game.devWarpToGoal(); this.close(); }, // resume so the payoff plays out
+        onClick: () => { game.devWarpToGoal(); this.close(); },
+      });
+      this.card({
+        icon: "◈", title: "Warp to surface", sub: "back to the spawn pad", actionLabel: "Warp",
+        onClick: () => { game.devWarpToSurface(); this.close(); },
       });
       for (const biome of BIOMES) {
         this.card({

@@ -18,7 +18,7 @@ import {
   REPAIR_KIT_HP,
   type ItemId,
 } from "./items";
-import { isModuleId, MAX_MODULE_SLOTS, MODULES, type ModuleId } from "./modules";
+import { isModuleId, MAX_MODULE_SLOTS, MODULE_ORDER, MODULES, type ModuleId } from "./modules";
 import { createPlayer, spawnPoint, type Player } from "./player";
 import { stepPlayer, type MoveInput } from "./physics";
 import {
@@ -36,6 +36,7 @@ import {
   createUpgradeState,
   currentTier,
   nextTier,
+  UPGRADES,
   type UpgradeState,
   type UpgradeTrack,
 } from "./upgrades";
@@ -72,6 +73,7 @@ export interface DevCheats {
   unlimitedFunds: boolean;
   noDamage: boolean;
   digAnything: boolean;
+  noHeat: boolean;
 }
 
 export class Game {
@@ -110,7 +112,10 @@ export class Game {
     unlimitedFunds: false,
     noDamage: false,
     digAnything: false,
+    noHeat: false,
   };
+  /** Set by any one-shot dev action (grants, warps) so the run never saves. */
+  private tainted = false;
 
   private readonly shop = new ShopOverlay();
   private readonly menu = new MenuOverlay();
@@ -153,6 +158,7 @@ export class Game {
   }
 
   startNewGame(): void {
+    this.tainted = false; // a genuinely fresh run saves again
     this.state = "briefing"; // a mission-brief card precedes the first descent
     this.onboarding = new Onboarding();
     this.goalReached = false;
@@ -167,6 +173,7 @@ export class Game {
   continueGame(): boolean {
     const data = this.pendingSave;
     if (!data) return false;
+    this.tainted = false; // a clean load saves again until a dev tool is used
     this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, data.seed, TILE);
     applyWorldSave(this.world, data);
     Object.assign(this.upgrades, data.upgrades);
@@ -185,9 +192,17 @@ export class Game {
     return true;
   }
 
-  /** True while any cheat is active — shows the HUD badge and blocks saving. */
+  /**
+   * True while any cheat is active or a one-shot dev action has run — shows the
+   * HUD badge and blocks saving so a tinkered-with run never overwrites real progress.
+   */
   get devMode(): boolean {
-    return Object.values(this.cheats).some(Boolean);
+    return this.tainted || Object.values(this.cheats).some(Boolean);
+  }
+
+  /** Flag the run as dev-tampered; called by every one-shot dev action. */
+  private taint(): void {
+    this.tainted = true;
   }
 
   toggleCheat(cheat: keyof DevCheats): boolean {
@@ -345,21 +360,25 @@ export class Game {
     }
 
     // Heat: the biome radiates it in, the radiator sheds it; overheating cooks
-    // the hull. No-damage cheat also spares the pod from thermal damage.
-    const wasOverheating = p.heat >= p.maxHeat;
-    const heatStep = stepHeat(dt, {
-      heat: p.heat,
-      maxHeat: p.maxHeat,
-      depth: this.depth,
-      ambient: BIOMES[bi]!.heat,
-      drilling: p.hasDigTarget,
-      coolMult: p.coolMult,
-    });
-    p.heat = heatStep.heat;
-    if (p.heat >= p.maxHeat && !wasOverheating) this.showToast("OVERHEATING!", 2);
-    if (heatStep.overheatDamage > 0) {
-      this.applyDamage(heatStep.overheatDamage, "Hull cooked by overheating");
-      if (this.state !== "playing") return;
+    // the hull. The noHeat cheat keeps the pod stone-cold for testing.
+    if (this.cheats.noHeat) {
+      p.heat = 0;
+    } else {
+      const wasOverheating = p.heat >= p.maxHeat;
+      const heatStep = stepHeat(dt, {
+        heat: p.heat,
+        maxHeat: p.maxHeat,
+        depth: this.depth,
+        ambient: BIOMES[bi]!.heat,
+        drilling: p.hasDigTarget,
+        coolMult: p.coolMult,
+      });
+      p.heat = heatStep.heat;
+      if (p.heat >= p.maxHeat && !wasOverheating) this.showToast("OVERHEATING!", 2);
+      if (heatStep.overheatDamage > 0) {
+        this.applyDamage(heatStep.overheatDamage, "Hull cooked by overheating");
+        if (this.state !== "playing") return;
+      }
     }
     if (!this.goalReached && this.depth >= SLICE.goalDepth) {
       this.reachAnomaly();
@@ -595,6 +614,7 @@ export class Game {
    * goal claimed so the payoff doesn't fire mid-exploration.
    */
   devWarpToDepth(depthMeters: number): void {
+    this.taint();
     const col = Math.floor(this.world.width / 2);
     const row = this.world.surfaceRow + Math.max(0, Math.round(depthMeters));
     for (let dy = -2; dy <= 2; dy++) {
@@ -619,6 +639,7 @@ export class Game {
    * it can be triggered again. The next tick's depth check fires the payoff.
    */
   devWarpToGoal(): void {
+    this.taint();
     const anom = this.world.anomaly;
     // Drop into the crafted chamber beside the beacon. If there's no set-piece
     // (e.g. a shallow test world), carve a small landing pocket instead.
@@ -640,6 +661,78 @@ export class Game {
     p.hasDigTarget = false;
     p.digProgress = 0;
     this.goalReached = false; // re-arm so the payoff triggers on arrival
+  }
+
+  /** Dev/test: pop the pod back up to the surface spawn (fuel/hull untouched). */
+  devWarpToSurface(): void {
+    this.taint();
+    const { x, y } = spawnPoint(this.world);
+    const p = this.player;
+    p.x = x;
+    p.y = y;
+    p.prevX = x;
+    p.prevY = y;
+    p.vx = 0;
+    p.vy = 0;
+    p.hasDigTarget = false;
+    p.digProgress = 0;
+  }
+
+  /** Dev/test: max every upgrade tier at once, then top off the pod's capacities. */
+  devMaxUpgrades(): void {
+    this.taint();
+    for (const track of Object.keys(UPGRADES) as UpgradeTrack[]) {
+      this.upgrades[track] = UPGRADES[track].length - 1;
+    }
+    this.applyUpgrades(this.player);
+    this.player.fuel = this.player.maxFuel;
+    this.player.hull = this.player.maxHull;
+    this.showToast("DEV · upgrades maxed", 1.5);
+  }
+
+  /** Dev/test: own every loadout module (equip them from the shop as usual). */
+  devGrantModules(): void {
+    this.taint();
+    for (const id of MODULE_ORDER) this.ownedModules.add(id);
+    this.showToast("DEV · all modules owned", 1.5);
+  }
+
+  /** Dev/test: stock every consumable to its max, for hotkey-testing items. */
+  devGrantItems(): void {
+    this.taint();
+    for (const id of ITEM_ORDER) this.player.items[id] = ITEMS[id].maxStack;
+    this.showToast("DEV · items granted", 1.5);
+  }
+
+  /** Dev/test: fill the cargo bay with assorted ore, to test full-bay and selling. */
+  devFillCargo(): void {
+    this.taint();
+    const ores = [TileId.Ironium, TileId.Bronzium, TileId.Silverium, TileId.Goldium];
+    let i = 0;
+    while (addToCargo(this.player.cargo, ores[i % ores.length]!, this.player.cargoCapacity)) i++;
+    this.showToast("DEV · cargo filled", 1.5);
+  }
+
+  /** Dev/test: inject cash without the infinite-money toggle, to test purchases. */
+  devGiveMoney(amount = 10000): void {
+    this.taint();
+    this.money += amount;
+    this.showToast(`DEV · +$${amount.toLocaleString()}`, 1.5);
+  }
+
+  /** Dev/test: top off fuel, hull, and heat in one shot. */
+  devRefill(): void {
+    this.taint();
+    this.player.fuel = this.player.maxFuel;
+    this.player.hull = this.player.maxHull;
+    this.player.heat = 0;
+    this.showToast("DEV · fuel & hull topped", 1.5);
+  }
+
+  /** Dev/test: destroy the pod on demand to exercise the death screen. */
+  devKillPod(): void {
+    this.taint();
+    this.die("Dev-triggered destruction");
   }
 
   /** Repair as much hull as money covers, at HULL.repairPricePerHp. */
