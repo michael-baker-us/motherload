@@ -16,6 +16,71 @@ export class PostFX {
   private readonly buf = document.createElement("canvas");
   /** Blur scratch, same small size as `buf`. */
   private readonly scratch = document.createElement("canvas");
+  // Cached full-screen gradients (rebuilt only when size / colour changes).
+  private hazeGrad: CanvasGradient | null = null;
+  private hazeKey = "";
+  private heatGrad: CanvasGradient | null = null;
+  private heatKey = "";
+
+  /**
+   * Aerial-perspective veil: the biome fog colour thickening toward the bottom
+   * of the frame so the depths read as murky and voluminous. `strength` is the
+   * peak alpha (typically scaled by the depth darkness), so it fades out near
+   * the surface for free.
+   */
+  depthHaze(
+    ctx: CanvasRenderingContext2D,
+    fog: readonly [number, number, number],
+    strength: number,
+    screenW: number,
+    screenH: number,
+  ): void {
+    if (strength <= 0.01) return;
+    const key = `${screenW}x${screenH}:${fog[0]},${fog[1]},${fog[2]}`;
+    if (this.hazeKey !== key || !this.hazeGrad) {
+      const g = ctx.createLinearGradient(0, 0, 0, screenH);
+      g.addColorStop(0, `rgba(${fog[0]},${fog[1]},${fog[2]},0.15)`);
+      g.addColorStop(1, `rgba(${fog[0]},${fog[1]},${fog[2]},1)`);
+      this.hazeGrad = g;
+      this.hazeKey = key;
+    }
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, strength);
+    ctx.fillStyle = this.hazeGrad;
+    ctx.fillRect(0, 0, screenW, screenH);
+    ctx.restore();
+  }
+
+  /**
+   * A subtle warm shimmer rising from the bottom of the frame, its intensity
+   * breathing over time — the magma biome's heat made visible without any
+   * per-pixel refraction (which Canvas 2D can't do cheaply). Additive.
+   */
+  heatHaze(
+    ctx: CanvasRenderingContext2D,
+    strength: number,
+    hz: number,
+    time: number,
+    screenW: number,
+    screenH: number,
+  ): void {
+    const a = strength * (0.55 + 0.45 * Math.sin(time * hz * Math.PI * 2));
+    if (a <= 0.004) return;
+    const key = `${screenW}x${screenH}`;
+    if (this.heatKey !== key || !this.heatGrad) {
+      const g = ctx.createLinearGradient(0, screenH, 0, screenH * 0.35);
+      g.addColorStop(0, "rgba(255,120,40,1)");
+      g.addColorStop(1, "rgba(255,120,40,0)");
+      this.heatGrad = g;
+      this.heatKey = key;
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = a;
+    ctx.fillStyle = this.heatGrad;
+    ctx.fillRect(0, 0, screenW, screenH);
+    ctx.restore();
+  }
 
   /**
    * Add a bloom halo around the emissive sources. `emitters` are in the world

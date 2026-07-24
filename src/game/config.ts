@@ -34,10 +34,13 @@ export const DEPTH = {
   face: { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 }, // brightness per face orientation
 };
 
-/** Particle / ambient-effect budgets. */
+/** Particle / ambient-effect budgets and atmosphere. */
 export const FX = {
   maxParticles: 400, // pool cap; the oldest particle is evicted on overflow
   motes: 22, // dust motes drifting in the headlamp beam
+  depthHaze: 0.32, // peak aerial-perspective veil (scaled by the depth darkness)
+  embers: { ratePerSec: 8 }, // ambient embers rising through the magma biome
+  heatHaze: { strength: 0.05, hz: 0.6 }, // subtle warm shimmer rising in the magma biome
 };
 
 /** Post-processing: bloom bleed + full-screen washes. */

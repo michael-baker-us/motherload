@@ -262,6 +262,9 @@ export class Renderer {
     }
     this.lighting.apply(ctx, this.lights, biome.fog, this.darkness, screenW, screenH);
 
+    // Aerial-perspective haze thickening with depth (fades out at the surface).
+    this.postfx.depthHaze(ctx, biome.fog, FX.depthHaze * this.darkness, screenW, screenH);
+
     // --- Emissive pass (zoomed + shaken, additive): glows over the darkness ---
     ctx.save();
     ctx.scale(ZOOM, ZOOM);
@@ -279,6 +282,11 @@ export class Renderer {
 
     // --- Bloom: bright emissive sources bleed a soft halo ---
     this.postfx.bloom(ctx, this.emitters, screenW, screenH, ZOOM, this.shakeX, this.shakeY);
+
+    // Heat shimmer rising through the magma biome (a no-op elsewhere).
+    if (biome.name === "Magma Depths" && !viewPrefs.reducedMotion) {
+      this.postfx.heatHaze(ctx, FX.heatHaze.strength, FX.heatHaze.hz, this.time, screenW, screenH);
+    }
 
     this.drawVignette(ctx, screenW, screenH);
     // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
@@ -412,6 +420,24 @@ export class Renderer {
         color: sparky ? "#ffd080" : "#a4643c",
         gravity: 500,
         additive: sparky,
+      });
+    }
+    // Ambient embers drifting up through the magma biome — spawned across the
+    // view floor and rising, so the air itself reads as hot.
+    if (biomeAt(game.depth).name === "Magma Depths" && Math.random() < FX.embers.ratePerSec * this.frameDt) {
+      const cam = game.camera;
+      const life = 2.4 + Math.random() * 1.8;
+      this.spawn({
+        x: cam.x + Math.random() * cam.viewWidth,
+        y: cam.y + cam.viewHeight + 8,
+        vx: (Math.random() - 0.5) * 14,
+        vy: -22 - Math.random() * 26,
+        life,
+        maxLife: life,
+        size: 1 + Math.random() * 1.4,
+        color: Math.random() > 0.5 ? "#ff9d3c" : "#ffcf6a",
+        gravity: -5, // embers accelerate gently upward
+        additive: true,
       });
     }
   }
