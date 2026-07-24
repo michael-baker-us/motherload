@@ -44,13 +44,30 @@ export const FX = {
   heatHaze: { strength: 0.05, hz: 0.6 }, // subtle warm shimmer rising in the magma biome
 };
 
+/** Camera feel — magnification, follow smoothing, look-ahead, shake, jolt zoom. */
+export const CAMERA = {
+  zoom: 1.6, // base world magnification (the HUD stays native)
+  ease: 5.5, // exponential follow-smoothing rate
+  lookX: 0.3, // horizontal velocity look-ahead factor
+  lookY: 0.22, // vertical velocity look-ahead factor
+  shakeDecay: 1.6, // per-second decay of the shake magnitude
+  shakeMag: 22, // px of shake at full magnitude
+  impactZoom: 0.035, // peak extra zoom punched in on a jolt
+  impactZoomDecay: 3.6, // per-second recovery of the zoom punch
+  sway: 0.02, // organic camera-drift amplitude, scaled by speed
+};
+
 /** Pod animation — the machine reacting to motion, landings, and damage. */
 export const POD_ANIM = {
-  bank: 0.16, // max banking tilt (radians) at full horizontal speed
+  bank: 0.16, // max banking tilt (radians) at full horizontal speed — airborne only
   squashImpact: 480, // downward impact speed (px/s) that yields full landing squash
   squashRecover: 6, // how fast the suspension springs back (per second)
-  bobAmp: 0.9, // idle bob amplitude (px) while airborne
-  bobHz: 1.4, // idle bob rate
+  // Idle "breathing": a slow vertical settle anchored at the tracks, so a resting
+  // pod idles in place rather than floating. Fades in after a beat at a standstill.
+  idleDelay: 1.3, // seconds at rest before the idle settle fades in
+  idleSpeed: 12, // px/s below which the pod counts as at rest
+  idleAmp: 0.05, // idle vertical breathe (scale fraction; base stays planted)
+  idleHz: 0.7, // idle breathe rate
   damageHull: 0.35, // hull fraction below which the warning light + sparks kick in
 };
 

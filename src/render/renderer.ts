@@ -1,5 +1,5 @@
 import { clamp, lerp } from "../engine/math";
-import { DEPTH, FX, LIGHT, PHYSICS, POD_ANIM, POST, SLICE, TILE, VIEW } from "../game/config";
+import { CAMERA, DEPTH, FX, LIGHT, PHYSICS, POD_ANIM, POST, SLICE, TILE } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
@@ -9,6 +9,7 @@ import { biomeAt } from "../game/biomes";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { bakeCrust, bakeEdge, bakeGlow } from "./bake";
+import { CameraFX } from "./camerafx";
 import { Lighting } from "./lighting";
 import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
@@ -42,8 +43,6 @@ interface FloatText {
   maxLife: number;
 }
 
-const ZOOM = VIEW.zoom;
-
 /**
  * All drawing lives here; Game stays logic-only (and node-testable). The
  * renderer owns purely cosmetic state: textures, particles, camera smoothing,
@@ -74,20 +73,15 @@ export class Renderer {
   // the darkness so they pierce it; and the lights that carve that darkness.
   private readonly emitters: Emitter[] = [];
   private readonly lights: Light[] = [];
-  private shake = 0;
-  // One stored shake offset per frame, shared by the world pass and the
-  // emissive replay so additive glows register with the shaken world.
-  private shakeX = 0;
-  private shakeY = 0;
+  // Cinematic camera: dynamic zoom, smoothing, look-ahead, shake. Its per-frame
+  // `zoom`/`shakeX`/`shakeY` are shared by the world pass, the emissive replay,
+  // the lights, and bloom so everything registers with the shaken, zoomed world.
+  private readonly camfx = new CameraFX();
   private flash = 0;
   private darkness = 0;
   private time = 0;
   private frameDt = 0;
   private lastNow = performance.now();
-  // Smoothed camera with velocity look-ahead.
-  private camReady = false;
-  private camX = 0;
-  private camY = 0;
   // Drill orientation is sticky: it holds its last dig direction briefly and
   // swings between orientations instead of snapping, so chained side-digs
   // (dig → roll to next wall → dig) don't flicker the drill down and back.
@@ -102,6 +96,13 @@ export class Renderer {
   // Landing suspension: spikes on a hard touchdown, springs back — the pod's
   // shocks compressing under the impact.
   private suspension = 0;
+  // Banking eases in only while airborne — a grounded pod sits level rather than
+  // leaning left/right as it drives. 0 = grounded/level, 1 = full airborne bank.
+  private bankLevel = 0;
+  // Idle hover: seconds the pod has sat still, and the eased bob amount that
+  // fades in once it's been at rest past POD_ANIM.idleDelay.
+  private idleTime = 0;
+  private idleBob = 0;
   // Screen transitions: a black fade that eases out on arrival in the world,
   // and a timer that paces the death screen's reveal instead of popping it.
   private prevState = "";
@@ -146,52 +147,22 @@ export class Renderer {
     const px = lerp(p.prevX, p.x, alpha);
     const py = lerp(p.prevY, p.y, alpha);
 
-    // The world renders magnified; the camera works in world units sized to
-    // the zoomed viewport. HUD and post effects stay at native resolution.
     const screenW = ctx.canvas.clientWidth;
     const screenH = ctx.canvas.clientHeight;
-    cam.resize(screenW / ZOOM, screenH / ZOOM);
 
-    // Camera: aim ahead of the pod's velocity, then ease toward the target.
-    let lookX = clamp(p.vx * 0.3, -80, 80);
-    let lookY = clamp(p.vy * 0.22, -45, 70);
-    // While drilling, lead the camera past the tile being cut so you see what
-    // you're about to break into (ore or lava) instead of digging blind — the
-    // pod is grounded and still, so velocity look-ahead alone reveals nothing.
-    if (p.hasDigTarget && game.state === "playing") {
-      const podCol = Math.floor((p.x + p.width / 2) / TILE);
-      const podRow = Math.floor((p.y + p.height / 2) / TILE);
-      if (p.digTargetY > podRow) lookY = Math.max(lookY, 58);
-      else if (p.digTargetX < podCol) lookX = Math.min(lookX, -56);
-      else if (p.digTargetX > podCol) lookX = Math.max(lookX, 56);
-    }
-    cam.follow(
-      px + p.width / 2 + lookX,
-      py + p.height / 2 + lookY,
-      game.world.pixelWidth,
-      game.world.pixelHeight,
-    );
-    if (!this.camReady) {
-      this.camX = cam.x;
-      this.camY = cam.y;
-      this.camReady = true;
-    }
-    const camEase = 1 - Math.exp(-5.5 * dt);
-    this.camX += (cam.x - this.camX) * camEase;
-    this.camY += (cam.y - this.camY) * camEase;
-    cam.x = this.camX;
-    cam.y = this.camY;
-
+    // Effects first — they can request shake / zoom-punch that the camera reads.
     this.consumeFx(game.fxEvents);
     this.emitContinuousFx(game, px, py);
     this.updateParticles(dt);
     this.updateFloats(dt);
-    // Tremor while the drill bites, building as the tile is about to give so
-    // the break has something to release. Decaying shake and recoil otherwise.
-    if (p.hasDigTarget && game.state === "playing") {
-      this.shake = Math.max(this.shake, 0.06 + clamp(p.digProgress, 0, 1) * 0.14);
-    }
-    this.shake = Math.max(0, this.shake - dt * 1.6);
+
+    // Cinematic camera: dynamic zoom, follow-smoothing, look-ahead, sway, shake.
+    // Writes cam.x/cam.y and this frame's zoom / shake offset.
+    this.camfx.update(cam, game, px, py, dt, screenW, screenH, viewPrefs.reducedMotion);
+    const zoom = this.camfx.zoom;
+    const shakeX = this.camfx.shakeX;
+    const shakeY = this.camfx.shakeY;
+
     this.drillRecoil = Math.max(0, this.drillRecoil - dt * 7);
     this.flash = Math.max(0, this.flash - dt * 2.2);
     // Suspension compresses on a hard landing (the sim reports the absorbed
@@ -207,12 +178,6 @@ export class Renderer {
     this.darkness = darknessAt(centerDepth);
     const biome = biomeAt(centerDepth);
 
-    // Reduced-motion suppresses the screen shake (accessibility/photosensitivity).
-    // Store the offset once so the world pass and the emissive replay share it.
-    const shakeMag = viewPrefs.reducedMotion ? 0 : this.shake * this.shake * 22;
-    this.shakeX = (Math.random() - 0.5) * shakeMag;
-    this.shakeY = (Math.random() - 0.5) * shakeMag;
-
     // The world pass collects emissive glows into these instead of drawing them
     // inline; they're replayed after the darkness so they pierce it.
     this.emitters.length = 0;
@@ -220,8 +185,8 @@ export class Renderer {
 
     // --- World albedo pass (zoomed + shaken): opaque geometry only ---
     ctx.save();
-    ctx.scale(ZOOM, ZOOM);
-    ctx.translate(this.shakeX, this.shakeY);
+    ctx.scale(zoom, zoom);
+    ctx.translate(shakeX, shakeY);
     this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time);
     this.drawTiles(ctx, game);
     this.drawStations(ctx, game);
@@ -241,8 +206,8 @@ export class Renderer {
 
     // --- Lighting: darkness carved by the headlamp, beacon, and the world's
     // own emissive sources (lava/thruster/dig collected during the world pass).
-    const podLX = (px - cam.x + p.width / 2 + this.shakeX) * ZOOM;
-    const podLY = (py - cam.y + p.height / 2 + this.shakeY) * ZOOM;
+    const podLX = (px - cam.x + p.width / 2 + shakeX) * zoom;
+    const podLY = (py - cam.y + p.height / 2 + shakeY) * zoom;
     const anom = game.world.anomaly;
     // Budget the *dynamic* lights (keep the nearest to the pod), reserving slots
     // for the always-present headlamp and beacon so they can't be crowded out.
@@ -256,15 +221,15 @@ export class Renderer {
     this.lights.push({
       x: podLX,
       y: podLY,
-      radius: LIGHT.radius * ZOOM,
+      radius: LIGHT.radius * zoom,
       color: LIGHT.headlampTint,
       intensity: 1,
       wash: 0.1,
     });
     if (anom) {
-      const ar = LIGHT.radius * ZOOM * (0.85 + 0.15 * Math.sin(this.time * 2));
-      const ax = (anom.x * TILE + TILE / 2 - cam.x + this.shakeX) * ZOOM;
-      const ay = (anom.y * TILE + TILE / 2 - cam.y + this.shakeY) * ZOOM;
+      const ar = LIGHT.radius * zoom * (0.85 + 0.15 * Math.sin(this.time * 2));
+      const ax = (anom.x * TILE + TILE / 2 - cam.x + shakeX) * zoom;
+      const ay = (anom.y * TILE + TILE / 2 - cam.y + shakeY) * zoom;
       if (ax > -ar && ax < screenW + ar && ay > -ar && ay < screenH + ar) {
         this.lights.push({ x: ax, y: ay, radius: ar, color: LIGHT.beaconTint, intensity: 0.9, wash: 0.16 });
       }
@@ -276,8 +241,8 @@ export class Renderer {
 
     // --- Emissive pass (zoomed + shaken, additive): glows over the darkness ---
     ctx.save();
-    ctx.scale(ZOOM, ZOOM);
-    ctx.translate(this.shakeX, this.shakeY);
+    ctx.scale(zoom, zoom);
+    ctx.translate(shakeX, shakeY);
     ctx.globalCompositeOperation = "lighter";
     for (const e of this.emitters) {
       ctx.globalAlpha = e.alpha;
@@ -290,7 +255,7 @@ export class Renderer {
     ctx.restore();
 
     // --- Bloom: bright emissive sources bleed a soft halo ---
-    this.postfx.bloom(ctx, this.emitters, screenW, screenH, ZOOM, this.shakeX, this.shakeY);
+    this.postfx.bloom(ctx, this.emitters, screenW, screenH, zoom, shakeX, shakeY);
 
     // Heat shimmer rising through the magma biome (a no-op elsewhere).
     if (biome.name === "Magma Depths" && !viewPrefs.reducedMotion) {
@@ -300,7 +265,7 @@ export class Renderer {
     this.drawVignette(ctx, screenW, screenH);
     // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
     if (this.flash > 0 && !viewPrefs.reducedMotion) this.drawFlash(ctx, screenW, screenH);
-    this.drawScanner(ctx, game); // reveals ore within scanner range, over the dark
+    this.drawScanner(ctx, game, zoom); // reveals ore within scanner range, over the dark
 
     if (game.state === "title") {
       this.drawTitleScreen(ctx, game);
@@ -370,16 +335,18 @@ export class Renderer {
           this.burst(e.x, e.y, 10, color, 175, 640, false); // fewer, faster shards
           this.burst(e.x, e.y, 8, "#ffffff", 150, 300, true); // bright sparks fly
         }
-        this.shake = Math.max(this.shake, cls === "hard" ? 0.34 : 0.28);
+        this.camfx.addShake(cls === "hard" ? 0.34 : 0.28);
         this.drillRecoil = 1;
       } else if (e.kind === "impact") {
         this.burst(e.x, e.y, 14, "#a4643c", 130, 300, false);
-        this.shake = Math.max(this.shake, clamp((e.power ?? 0) / 60, 0.25, 0.6));
+        this.camfx.addShake(clamp((e.power ?? 0) / 60, 0.25, 0.6));
+        this.camfx.punchZoom(CAMERA.impactZoom * clamp((e.power ?? 0) / 80, 0.4, 1));
         this.flash = Math.max(this.flash, 0.45);
       } else if (e.kind === "explosion") {
         this.burst(e.x, e.y, 26, "#ff9d2e", 220, 200, true);
         this.burst(e.x, e.y, 12, "#ffe97a", 160, 100, true);
-        this.shake = Math.max(this.shake, 0.6);
+        this.camfx.addShake(0.6);
+        this.camfx.punchZoom(CAMERA.impactZoom);
         this.flash = Math.max(this.flash, 0.8);
       } else if (e.kind === "upgrade") {
         this.burst(e.x, e.y, 20, "#ffe97a", 140, -40, true);
@@ -398,7 +365,8 @@ export class Renderer {
         this.burst(e.x, e.y, 30, "#ffd0a0", 250, 120, true);
         this.burst(e.x, e.y, 22, "#ff6a3c", 210, 180, true);
         this.burst(e.x, e.y, 18, "#8a8078", 150, 420, false);
-        this.shake = Math.max(this.shake, 0.95);
+        this.camfx.addShake(0.95);
+        this.camfx.punchZoom(CAMERA.impactZoom * 1.4);
         this.flash = Math.max(this.flash, 0.9);
       }
     }
@@ -592,9 +560,9 @@ export class Renderer {
     wash: number,
   ): void {
     this.lights.push({
-      x: (sx + this.shakeX) * ZOOM,
-      y: (sy + this.shakeY) * ZOOM,
-      radius: radiusWorld * ZOOM,
+      x: (sx + this.camfx.shakeX) * this.camfx.zoom,
+      y: (sy + this.camfx.shakeY) * this.camfx.zoom,
+      radius: radiusWorld * this.camfx.zoom,
       color,
       intensity,
       wash,
@@ -1066,19 +1034,38 @@ export class Renderer {
       sy -= this.lastDigDY * kick;
     }
 
-    // The pod reads as a machine reacting to its own motion: it banks into
-    // horizontal travel, its shocks compress on a hard landing, and it bobs
-    // faintly while airborne. One transform around the pod centre carries the
-    // whole rig (body, drill, thruster) together.
+    // The pod reads as a machine reacting to its own motion. Two anchors carry
+    // the whole rig (body, drill, thruster): the tracks (base) for the landing
+    // squash and idle breathe so nothing floats, and the body centre for the
+    // airborne bank.
     const bodyCx = sx + w / 2;
     const bodyCy = sy + h / 2;
-    const bank = clamp(p.vx / PHYSICS.maxVx, -1, 1) * POD_ANIM.bank;
-    const bob = p.grounded ? 0 : Math.sin(this.time * POD_ANIM.bobHz * Math.PI * 2) * POD_ANIM.bobAmp;
+    const baseY = sy + h; // the tracks — kept planted
+
+    // Banking eases in only while airborne, so a grounded pod drives level
+    // instead of leaning left/right; it eases back in on lift-off (no snap).
+    this.bankLevel += ((p.grounded ? 0 : 1) - this.bankLevel) * (1 - Math.exp(-10 * this.frameDt));
+    const bank = clamp(p.vx / PHYSICS.maxVx, -1, 1) * POD_ANIM.bank * this.bankLevel;
+
+    // Idle settle: once the pod has been still (not moving, thrusting, or
+    // drilling) past a short delay, a slow vertical breathe fades in — anchored
+    // at the tracks, so it idles in place rather than levitating.
+    const still = !game.isThrusting && !p.hasDigTarget && Math.hypot(p.vx, p.vy) < POD_ANIM.idleSpeed;
+    this.idleTime = still ? this.idleTime + this.frameDt : 0;
+    this.idleBob += ((this.idleTime > POD_ANIM.idleDelay ? 1 : 0) - this.idleBob) * (1 - Math.exp(-5 * this.frameDt));
+    const breathe = 1 + Math.sin(this.time * POD_ANIM.idleHz * Math.PI * 2) * POD_ANIM.idleAmp * this.idleBob;
+
     ctx.save();
-    ctx.translate(bodyCx, bodyCy + bob);
-    ctx.rotate(bank);
-    ctx.scale(1 + this.suspension * 0.16, 1 - this.suspension * 0.26); // shocks compress: wider + shorter
-    ctx.translate(-bodyCx, -bodyCy);
+    // Landing squash + idle breathe: vertical scale anchored at the tracks.
+    ctx.translate(bodyCx, baseY);
+    ctx.scale(1 + this.suspension * 0.16, (1 - this.suspension * 0.26) * breathe);
+    ctx.translate(-bodyCx, -baseY);
+    // Airborne bank: lean around the body centre.
+    if (bank !== 0) {
+      ctx.translate(bodyCx, bodyCy);
+      ctx.rotate(bank);
+      ctx.translate(-bodyCx, -bodyCy);
+    }
 
     // Thruster flame: layered, flickering, glowing. The soft glow is emissive
     // (replayed after the darkness); the flame body stays here in the albedo
@@ -1376,7 +1363,7 @@ export class Renderer {
   }
 
   /** Scanner upgrade: mark ore within range, pulsing through rock and darkness. */
-  private drawScanner(ctx: CanvasRenderingContext2D, game: Game): void {
+  private drawScanner(ctx: CanvasRenderingContext2D, game: Game, zoom: number): void {
     const p = game.player;
     if (p.scanRange <= 0 || game.state !== "playing") return;
     const cam = game.camera;
@@ -1385,7 +1372,7 @@ export class Renderer {
     const R = Math.round(p.scanRange);
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 3);
     ctx.save();
-    ctx.scale(ZOOM, ZOOM);
+    ctx.scale(zoom, zoom);
     ctx.globalCompositeOperation = "lighter";
     for (let dy = -R; dy <= R; dy++) {
       for (let dx = -R; dx <= R; dx++) {
