@@ -746,6 +746,13 @@ export class Renderer {
       }
     }
 
+    // Fake-normal sculpting: cavity faces respond to the pod headlamp (the
+    // dominant light). Faces turned toward the lamp catch light; those turned
+    // away fall into shadow. The effect scales with darkness, so the lit
+    // surface keeps its flat ambient shading.
+    const p = game.player;
+    const podCol = (p.x + p.width / 2) / TILE;
+    const podRow = (p.y + p.height / 2) / TILE;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const tile = world.getTile(tx, ty);
@@ -756,16 +763,33 @@ export class Renderer {
           const down = world.getTile(tx, ty + 1);
           const left = world.getTile(tx - 1, ty);
           const right = world.getTile(tx + 1, ty);
-          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, DEPTH.face.ceiling, px, py);
-          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, DEPTH.face.floor, px, py);
-          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, DEPTH.face.wall, px, py);
-          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, DEPTH.face.wall, px, py);
+          // A face is lit when the lamp is on the side its surface points toward.
+          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py);
+          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, this.faceLight(DEPTH.face.floor, podRow < ty, tx, ty, podCol, podRow), px, py);
+          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, this.faceLight(DEPTH.face.wall, podCol > tx, tx, ty, podCol, podRow), px, py);
+          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, this.faceLight(DEPTH.face.wall, podCol < tx, tx, ty, podCol, podRow), px, py);
         } else if (TILE_DEFS[tile].solid && world.getTile(tx, ty - 1) === TileId.Sky) {
           // Sunlit lip along the surface — the terrain's visible top face.
           this.face(ctx, sx, sy, sx + TILE, sy, tile, DEPTH.face.lip, px, py);
         }
       }
     }
+  }
+
+  /**
+   * Brightness for one cavity face: its `base` ambient, modulated toward the
+   * pod headlamp. `litSide` is whether the lamp lies on the side the face
+   * points toward; the directional term is strongest when the face is both
+   * facing the lamp and near it, and fades out with darkness so the lit surface
+   * stays on its flat ambient shading.
+   */
+  private faceLight(base: number, litSide: boolean, tx: number, ty: number, podCol: number, podRow: number): number {
+    const t = this.darkness;
+    if (t < 0.05) return base;
+    const d = Math.hypot(podCol - (tx + 0.5), podRow - (ty + 0.5));
+    const prox = clamp(1 - d / DEPTH.lightRange, 0, 1);
+    const dir = litSide ? prox : 0;
+    return base * (1 - 0.25 * t + 0.5 * dir * t);
   }
 
   /** One extruded face: front edge (ax,ay)→(bx,by) swept to the back plane. */
@@ -780,10 +804,13 @@ export class Renderer {
     px: (x: number) => number,
     py: (y: number) => number,
   ): void {
-    const key = tile * 10 + light;
+    // Quantise the (now continuous) light factor so the colour LUT stays small:
+    // ~48 buckets per tile instead of a fresh shade() per face per frame.
+    const bucket = Math.round(clamp(light, 0, 2) * 24);
+    const key = tile * 64 + bucket;
     let color = this.faceColors.get(key);
     if (!color) {
-      color = shade(TILE_DEFS[tile].color, light);
+      color = shade(TILE_DEFS[tile].color, bucket / 24);
       this.faceColors.set(key, color);
     }
     ctx.fillStyle = color;

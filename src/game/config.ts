@@ -28,10 +28,11 @@ export const LIGHT = {
   digFlare: { radius: 40, color: [255, 200, 120] as const, intensity: 0.5, wash: 0.1 }, // the drill face lights up as it bites
 };
 
-/** 2.5D depth pass: cavity projection + flat per-face shading. */
+/** 2.5D depth pass: cavity projection + per-face shading. */
 export const DEPTH = {
   backScale: 0.85, // how far the cavity back plane recedes toward the view centre
-  face: { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 }, // brightness per face orientation
+  face: { ceiling: 0.34, wall: 0.5, floor: 0.68, lip: 1.2 }, // ambient brightness per face orientation
+  lightRange: 8, // tiles over which cavity faces respond to the headlamp (fake-normal sculpting)
 };
 
 /** Particle / ambient-effect budgets and atmosphere. */
