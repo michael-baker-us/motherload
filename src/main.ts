@@ -3,6 +3,7 @@ import { loadAudioSettings } from "./audio/settings";
 import { loadBindings } from "./engine/bindings";
 import { Loop } from "./engine/loop";
 import { Input } from "./engine/input";
+import * as config from "./game/config";
 import { Game } from "./game/game";
 import { loadViewPrefs } from "./render/prefs";
 import { Renderer } from "./render/renderer";
@@ -32,6 +33,8 @@ if (import.meta.env.DEV) {
   (window as unknown as { __game: Game }).__game = game;
   (window as unknown as { __audio: AudioEngine }).__audio = audio;
   (window as unknown as { __renderer: Renderer }).__renderer = renderer;
+  // Live-tunable render config (LIGHT/POST/FX/…) for console tweaking + verify.
+  (window as unknown as { __config: typeof config }).__config = config;
 }
 
 function resize(): void {

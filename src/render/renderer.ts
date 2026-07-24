@@ -1,5 +1,5 @@
 import { clamp, lerp } from "../engine/math";
-import { DEPTH, FX, LIGHT, SLICE, TILE, VIEW } from "../game/config";
+import { DEPTH, FX, LIGHT, POST, SLICE, TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
@@ -11,6 +11,7 @@ import { Hud } from "../ui/hud";
 import { bakeCrust, bakeEdge, bakeGlow } from "./bake";
 import { Lighting } from "./lighting";
 import { darknessAt, flicker, type Emitter, type Light } from "./lights";
+import { PostFX } from "./postfx";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
@@ -55,6 +56,7 @@ export class Renderer {
   private readonly sky = new Sky();
   private readonly hud = new Hud();
   private readonly lighting = new Lighting();
+  private readonly postfx = new PostFX();
   // Baked overlays: soft tunnel shadows per exposed side, sunlit crust, glows.
   private readonly shadeTop = bakeEdge(0, -1);
   private readonly shadeBottom = bakeEdge(0, 1);
@@ -274,6 +276,9 @@ export class Renderer {
     this.drawParticles(ctx, game, true);
     this.drawMotes(ctx, px - cam.x + p.width / 2, py - cam.y + p.height / 2);
     ctx.restore();
+
+    // --- Bloom: bright emissive sources bleed a soft halo ---
+    this.postfx.bloom(ctx, this.emitters, screenW, screenH, ZOOM, this.shakeX, this.shakeY);
 
     this.drawVignette(ctx, screenW, screenH);
     // Reduced-motion suppresses the full-screen damage flash (photosensitivity).
@@ -1337,7 +1342,7 @@ export class Renderer {
         Math.max(vw, vh) * 0.75,
       );
       grad.addColorStop(0, "rgba(0,0,0,0)");
-      grad.addColorStop(1, "rgba(0,0,0,0.3)");
+      grad.addColorStop(1, `rgba(0,0,0,${POST.vignette})`);
       this.vignetteGrad = grad;
       this.vignetteKey = key;
     }
@@ -1356,7 +1361,7 @@ export class Renderer {
       Math.max(vw, vh) * 0.72,
     );
     grad.addColorStop(0, "rgba(200,30,10,0)");
-    grad.addColorStop(1, `rgba(200,30,10,${(this.flash * 0.42).toFixed(3)})`);
+    grad.addColorStop(1, `rgba(200,30,10,${(this.flash * POST.flash).toFixed(3)})`);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, vw, vh);
   }

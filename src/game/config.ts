@@ -40,6 +40,18 @@ export const FX = {
   motes: 22, // dust motes drifting in the headlamp beam
 };
 
+/** Post-processing: bloom bleed + full-screen washes. */
+export const POST = {
+  bloom: {
+    enabled: true,
+    downscale: 0.5, // bloom buffer resolution vs the screen (0.25 = cheaper/softer)
+    blurPx: 8, // gaussian blur radius in screen px
+    strength: 0.6, // how strongly the bloom is added back
+  },
+  vignette: 0.3, // darkness at the frame corners
+  flash: 0.42, // peak alpha of the red damage flash
+};
+
 export const WORLD = {
   width: 60, // tiles
   height: 2000, // tiles
