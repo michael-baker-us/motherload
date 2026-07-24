@@ -103,6 +103,13 @@ export class Renderer {
   // fades in once it's been at rest past POD_ANIM.idleDelay.
   private idleTime = 0;
   private idleBob = 0;
+  // Directable headlamp: the eased aim angle (radians) the beam + lamp turret
+  // point along — toward the dig, the pod's heading, or its facing at rest.
+  private beamAngle = 0;
+  // Hold the last dig aim briefly so the lamp doesn't flick back to horizontal
+  // in the split-second gaps between drilled tiles.
+  private beamDigHold = 0;
+  private lastDigAim = Math.PI / 2;
   // Screen transitions: a black fade that eases out on arrival in the world,
   // and a timer that paces the death screen's reveal instead of popping it.
   private prevState = "";
@@ -178,6 +185,10 @@ export class Renderer {
     this.darkness = darknessAt(centerDepth);
     const biome = biomeAt(centerDepth);
 
+    // Aim the directable headlamp for this frame (used by the pod turret and the
+    // beam light alike).
+    if (viewPrefs.headlampBeam) this.updateBeamAngle(game);
+
     // The world pass collects emissive glows into these instead of drawing them
     // inline; they're replayed after the darkness so they pierce it.
     this.emitters.length = 0;
@@ -218,14 +229,30 @@ export class Renderer {
       );
       this.lights.length = LIGHT.budget - reserve;
     }
-    this.lights.push({
-      x: podLX,
-      y: podLY,
-      radius: LIGHT.radius * zoom,
-      color: LIGHT.headlampTint,
-      intensity: 1,
-      wash: 0.1,
-    });
+    if (viewPrefs.headlampBeam) {
+      // Directional lamp anchored at the roof fixture: a tight pool keeps the
+      // pod fully lit while a cone throws light along the aim.
+      const lampY = (py - cam.y + 3 + shakeY) * zoom;
+      this.lights.push({
+        x: podLX,
+        y: lampY,
+        radius: LIGHT.beam.ambientRadius * zoom,
+        color: LIGHT.headlampTint,
+        intensity: 1,
+        wash: 0.12,
+        beamAngle: this.beamAngle,
+        beamLen: LIGHT.beam.length * zoom,
+      });
+    } else {
+      this.lights.push({
+        x: podLX,
+        y: podLY,
+        radius: LIGHT.radius * zoom,
+        color: LIGHT.headlampTint,
+        intensity: 1,
+        wash: 0.1,
+      });
+    }
     if (anom) {
       const ar = LIGHT.radius * zoom * (0.85 + 0.15 * Math.sin(this.time * 2));
       const ax = (anom.x * TILE + TILE / 2 - cam.x + shakeX) * zoom;
@@ -544,6 +571,36 @@ export class Renderer {
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
+  }
+
+  /**
+   * Ease the headlamp aim toward where the pod is working or heading: the dig
+   * direction while drilling, the velocity heading while moving, else its
+   * horizontal facing at rest. Angles wrap correctly so it swings the short way.
+   */
+  private updateBeamAngle(game: Game): void {
+    const p = game.player;
+    let aim: number;
+    if (p.hasDigTarget) {
+      const podCol = Math.floor((p.x + p.width / 2) / TILE);
+      const podRow = Math.floor((p.y + p.height / 2) / TILE);
+      this.lastDigAim =
+        p.digTargetY > podRow ? Math.PI / 2 : p.digTargetX < podCol ? Math.PI : p.digTargetX > podCol ? 0 : Math.PI / 2;
+      this.beamDigHold = 0.4; // bridge the gaps between drilled tiles
+      aim = this.lastDigAim;
+    } else if (this.beamDigHold > 0) {
+      // Just between tiles while drilling — hold the dig aim so the lamp doesn't
+      // flick back to horizontal and forth.
+      this.beamDigHold -= this.frameDt;
+      aim = this.lastDigAim;
+    } else if (Math.hypot(p.vx, p.vy) > 45) {
+      aim = Math.atan2(p.vy, p.vx);
+    } else {
+      aim = p.facing < 0 ? Math.PI : 0;
+    }
+    let d = aim - this.beamAngle;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.beamAngle += d * (1 - Math.exp(-9 * this.frameDt));
   }
 
   /**
@@ -1242,16 +1299,46 @@ export class Renderer {
     ctx.arc(cx - 1.5, cy - 1.5, 1.6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Headlamp on the leading edge, glowing once it's dark enough to matter.
-    const lampX = sx + (p.facing === 1 ? w - 2 : 2);
-    const lampY = sy + h * 0.3;
-    ctx.fillStyle = "#e8e4d8";
-    ctx.beginPath();
-    ctx.roundRect(lampX - 2, lampY - 2, 4, 4, 1.5);
-    ctx.fill();
-    // Headlamp glow (emissive — replayed after the darkness once it's dark enough).
-    if (this.darkness > 0.12) {
-      this.emitters.push({ sprite: this.warmGlow, x: lampX - 16, y: lampY - 16, w: 32, h: 32, alpha: 0.55 * this.darkness });
+    if (viewPrefs.headlampBeam) {
+      // Headlamp fixture bolted to the pod's roof — a squat housing with a warm
+      // lens. It stays put (the projected beam does the aiming), so it reads as
+      // mounted rather than hand-held.
+      const lampX = sx + w / 2;
+      const lampY = sy - 1;
+      ctx.fillStyle = "#31333a"; // housing shell
+      ctx.beginPath();
+      ctx.roundRect(lampX - 5.5, lampY - 3, 11, 7, [3, 3, 1, 1]);
+      ctx.fill();
+      ctx.fillStyle = "#43454e"; // top edge highlight
+      ctx.beginPath();
+      ctx.roundRect(lampX - 5.5, lampY - 3, 11, 2, [3, 3, 0, 0]);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(lampX - 5.5, lampY - 3, 11, 7, [3, 3, 1, 1]);
+      ctx.stroke();
+      ctx.fillStyle = "#ffe6a6"; // lens
+      ctx.beginPath();
+      ctx.ellipse(lampX, lampY + 1, 3.4, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff8e0"; // hot core
+      ctx.beginPath();
+      ctx.ellipse(lampX, lampY + 0.5, 1.7, 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Warm glow at the lens (emissive — replayed after the darkness).
+      this.emitters.push({ sprite: this.warmGlow, x: lampX - 16, y: lampY - 15, w: 32, h: 32, alpha: 0.32 + 0.5 * this.darkness });
+    } else {
+      // Fixed lamp on the leading edge (all-round-glow mode).
+      const lampX = sx + (p.facing === 1 ? w - 2 : 2);
+      const lampY = sy + h * 0.3;
+      ctx.fillStyle = "#e8e4d8";
+      ctx.beginPath();
+      ctx.roundRect(lampX - 2, lampY - 2, 4, 4, 1.5);
+      ctx.fill();
+      if (this.darkness > 0.12) {
+        this.emitters.push({ sprite: this.warmGlow, x: lampX - 16, y: lampY - 16, w: 32, h: 32, alpha: 0.55 * this.darkness });
+      }
     }
 
     // Damage warning beacon: a red light on the hull roof blinks once the pod

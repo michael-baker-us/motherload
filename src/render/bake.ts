@@ -53,6 +53,50 @@ export function bakeGlow(size: number, r: number, g: number, b: number): HTMLCan
 }
 
 /**
+ * A soft warm light *cone* pointing +x, its apex at the left-centre (0, H/2).
+ * Baked once at a reference length and scaled per frame. The warm colour +
+ * alpha profile serves both jobs: its alpha carves the darkness (destination-out)
+ * and its colour tints the beam (a low-alpha source-over wash). Edges are
+ * blurred so the cone feathers into the dark instead of ending in a hard wedge.
+ */
+export function bakeBeam(length: number, spread: number): HTMLCanvasElement {
+  const farHalf = Math.tan(spread) * length;
+  const pad = 12;
+  const w = Math.ceil(length) + pad;
+  const h = Math.ceil(farHalf * 2) + pad * 2;
+  const oy = h / 2;
+
+  const sharp = document.createElement("canvas");
+  sharp.width = w;
+  sharp.height = h;
+  const s = sharp.getContext("2d")!;
+  const grad = s.createRadialGradient(0, oy, 4, 0, oy, length);
+  grad.addColorStop(0, "rgba(255,198,124,0.95)");
+  grad.addColorStop(0.5, "rgba(255,190,110,0.5)");
+  grad.addColorStop(1, "rgba(255,185,105,0)");
+  s.save();
+  s.beginPath();
+  s.moveTo(0, oy);
+  s.lineTo(length, oy - farHalf);
+  s.lineTo(length, oy + farHalf);
+  s.closePath();
+  s.clip();
+  s.fillStyle = grad;
+  s.fillRect(0, 0, w, h);
+  s.restore();
+
+  // Feather the wedge edges.
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.filter = "blur(5px)";
+  ctx.drawImage(sharp, 0, 0);
+  ctx.filter = "none";
+  return canvas;
+}
+
+/**
  * Soft-edged alpha "hole" mask for carving light out of the darkness overlay.
  * Only the alpha channel matters (used via destination-out); the profile —
  * opaque core, feathered to nothing at the rim — is what shapes the falloff.

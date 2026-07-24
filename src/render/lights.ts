@@ -20,6 +20,10 @@ export interface Light {
   intensity: number;
   /** Colour-wash strength inside the halo, 0–1. Defaults handled by the consumer. */
   wash?: number;
+  /** Optional directional cone, aimed at this angle in radians (0 = +x/right, π/2 = down). */
+  beamAngle?: number;
+  /** Cone reach in screen px (present iff `beamAngle` is). */
+  beamLen?: number;
 }
 
 /**

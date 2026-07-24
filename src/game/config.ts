@@ -21,6 +21,14 @@ export const LIGHT = {
   radius: 165, // headlamp / beacon light radius in world px (× zoom on screen)
   headlampTint: [255, 190, 110] as const, // warm wash inside the lamp halo
   beaconTint: [120, 230, 255] as const, // cool wash around the objective beacon
+  // Directional headlamp (optional, toggled in the Display menu): a tight pool
+  // keeps the pod fully lit while a cone projects light the way it's facing.
+  beam: {
+    ambientRadius: 60, // world px pool around the pod so it stays fully visible
+    length: 320, // world px cone reach in the facing direction
+    spread: 0.36, // cone half-angle (radians)
+    wash: 0.12, // warm colour-wash strength along the beam
+  },
   budget: 24, // max dynamic lights composited per frame (nearest-to-pod kept)
   // Emissive world sources that carve their own light out of the darkness.
   lava: { radius: 52, color: [255, 120, 30] as const, intensity: 0.8, wash: 0.16, flicker: 0.3, hz: 2.6 },

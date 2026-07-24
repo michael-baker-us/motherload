@@ -11,7 +11,7 @@ export const VIEW_KEY = "motherload-view";
  * accessibility/photosensitivity safeguard — and defaults to the OS
  * `prefers-reduced-motion` setting.
  */
-export const viewPrefs = { depth: true, reducedMotion: false };
+export const viewPrefs = { depth: true, reducedMotion: false, headlampBeam: true };
 
 export function loadViewPrefs(storage: SaveStorage | null): void {
   // Seed reduced-motion from the OS accessibility preference…
@@ -26,9 +26,10 @@ export function loadViewPrefs(storage: SaveStorage | null): void {
   try {
     const raw = storage?.getItem(VIEW_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as { depth?: boolean; reducedMotion?: boolean };
+      const p = JSON.parse(raw) as { depth?: boolean; reducedMotion?: boolean; headlampBeam?: boolean };
       viewPrefs.depth = p.depth !== false;
       if (typeof p.reducedMotion === "boolean") viewPrefs.reducedMotion = p.reducedMotion;
+      if (typeof p.headlampBeam === "boolean") viewPrefs.headlampBeam = p.headlampBeam;
     }
   } catch {
     // Corrupt prefs: keep defaults.
@@ -45,4 +46,10 @@ export function toggleReducedMotion(storage: SaveStorage | null): boolean {
   viewPrefs.reducedMotion = !viewPrefs.reducedMotion;
   storage?.setItem(VIEW_KEY, JSON.stringify(viewPrefs));
   return viewPrefs.reducedMotion;
+}
+
+export function toggleHeadlampBeam(storage: SaveStorage | null): boolean {
+  viewPrefs.headlampBeam = !viewPrefs.headlampBeam;
+  storage?.setItem(VIEW_KEY, JSON.stringify(viewPrefs));
+  return viewPrefs.headlampBeam;
 }

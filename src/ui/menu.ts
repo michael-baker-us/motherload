@@ -10,7 +10,7 @@ import {
   type Action,
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
-import { toggleDepthView, toggleReducedMotion, viewPrefs } from "../render/prefs";
+import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFuel", "Unlimited fuel"],
@@ -131,6 +131,11 @@ export class MenuOverlay {
       icon: "✦", title: "Reduce shake & flash", sub: "photosensitivity safe",
       actionLabel: viewPrefs.reducedMotion ? "ON" : "OFF", on: viewPrefs.reducedMotion,
       onClick: () => { toggleReducedMotion(window.localStorage); this.render(game); },
+    });
+    this.card({
+      icon: "☀", title: "Headlamp", sub: viewPrefs.headlampBeam ? "directional beam" : "all-round glow",
+      actionLabel: viewPrefs.headlampBeam ? "Beam" : "Glow", on: viewPrefs.headlampBeam,
+      onClick: () => { toggleHeadlampBeam(window.localStorage); this.render(game); },
     });
 
     const audio = activeAudio();
