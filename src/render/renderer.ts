@@ -10,7 +10,7 @@ import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game
 import { Hud } from "../ui/hud";
 import { bakeCrust, bakeEdge, bakeGlow } from "./bake";
 import { Lighting } from "./lighting";
-import { darknessAt, type Emitter, type Light } from "./lights";
+import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
@@ -228,16 +228,28 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // --- Lighting: darkness overlay carved by the pod headlamp + beacon ---
+    // --- Lighting: darkness carved by the headlamp, beacon, and the world's
+    // own emissive sources (lava/thruster/dig collected during the world pass).
+    const podLX = (px - cam.x + p.width / 2 + this.shakeX) * ZOOM;
+    const podLY = (py - cam.y + p.height / 2 + this.shakeY) * ZOOM;
+    const anom = game.world.anomaly;
+    // Budget the *dynamic* lights (keep the nearest to the pod), reserving slots
+    // for the always-present headlamp and beacon so they can't be crowded out.
+    const reserve = anom ? 2 : 1;
+    if (this.lights.length > LIGHT.budget - reserve) {
+      this.lights.sort(
+        (a, b) => (a.x - podLX) ** 2 + (a.y - podLY) ** 2 - ((b.x - podLX) ** 2 + (b.y - podLY) ** 2),
+      );
+      this.lights.length = LIGHT.budget - reserve;
+    }
     this.lights.push({
-      x: (px - cam.x + p.width / 2 + this.shakeX) * ZOOM,
-      y: (py - cam.y + p.height / 2 + this.shakeY) * ZOOM,
+      x: podLX,
+      y: podLY,
       radius: LIGHT.radius * ZOOM,
       color: LIGHT.headlampTint,
       intensity: 1,
       wash: 0.1,
     });
-    const anom = game.world.anomaly;
     if (anom) {
       const ar = LIGHT.radius * ZOOM * (0.85 + 0.15 * Math.sin(this.time * 2));
       const ax = (anom.x * TILE + TILE / 2 - cam.x + this.shakeX) * ZOOM;
@@ -498,6 +510,29 @@ export class Renderer {
     ctx.textBaseline = "top";
   }
 
+  /**
+   * Queue a light from a world-space (camera-relative, pre-zoom) centre point.
+   * Bakes in the shared shake and zoom so the darkness holes register with the
+   * shaken world, matching the emissive replay pass.
+   */
+  private pushLight(
+    sx: number,
+    sy: number,
+    radiusWorld: number,
+    color: readonly [number, number, number],
+    intensity: number,
+    wash: number,
+  ): void {
+    this.lights.push({
+      x: (sx + this.shakeX) * ZOOM,
+      y: (sy + this.shakeY) * ZOOM,
+      radius: radiusWorld * ZOOM,
+      color,
+      intensity,
+      wash,
+    });
+  }
+
   /** The objective beacon: a pulsing faceted crystal with an additive halo. */
   private drawAnomaly(ctx: CanvasRenderingContext2D, sx: number, sy: number): void {
     const cx = sx + TILE / 2;
@@ -583,6 +618,15 @@ export class Renderer {
           // Emissive: replayed after the darkness so it glows through the dark.
           const pulse = 0.55 + 0.35 * Math.sin(this.time * 2.5 + hash2d(tx, ty, 3) * 6);
           this.emitters.push({ sprite: this.lavaGlow, x: sx + TILE / 2 - 48, y: sy + TILE / 2 - 48, w: 96, h: 96, alpha: pulse });
+          // A light that carves its own pool out of the darkness. Edge-merge:
+          // an interior cell (lava on both its left and top) defers to its
+          // neighbours, bounding the light count across a pooled lava floor.
+          const interior = world.getTile(tx - 1, ty) === TileId.Lava && world.getTile(tx, ty - 1) === TileId.Lava;
+          if (!interior && this.darkness > 0.01) {
+            const phase = hash2d(tx, ty, 5) * Math.PI * 2;
+            const intensity = flicker(LIGHT.lava.intensity, LIGHT.lava.flicker, LIGHT.lava.hz, this.time, phase);
+            this.pushLight(sx + TILE / 2, sy + TILE / 2, LIGHT.lava.radius, LIGHT.lava.color, intensity, LIGHT.lava.wash);
+          }
         } else if (TILE_DEFS[tile].value > 0) {
           // Occasional glint so ore catches the eye.
           const cycle = (this.time * 0.5 + hash2d(tx, ty, 11) * 7) % 7;
@@ -632,6 +676,10 @@ export class Renderer {
 
       // Molten flare where the drill bites (emissive — replayed after dark).
       this.emitters.push({ sprite: this.warmGlow, x: sx + TILE / 2 - 14, y: sy + TILE / 2 - 14, w: 28, h: 28, alpha: 0.5 + Math.random() * 0.4 });
+      // The work face lights up as the drill bites.
+      if (this.darkness > 0.01) {
+        this.pushLight(sx + TILE / 2, sy + TILE / 2, LIGHT.digFlare.radius, LIGHT.digFlare.color, LIGHT.digFlare.intensity * (0.6 + Math.random() * 0.4), LIGHT.digFlare.wash);
+      }
     }
   }
 
@@ -929,6 +977,10 @@ export class Renderer {
     if (game.isThrusting && game.state === "playing") {
       const len = 11 + Math.random() * 6;
       this.emitters.push({ sprite: this.warmGlow, x: sx + w / 2 - 24, y: sy + h + 2 - 24, w: 48, h: 48, alpha: 0.8 });
+      // The engine casts a warm glow down the shaft below the pod.
+      if (this.darkness > 0.01) {
+        this.pushLight(sx + w / 2, sy + h + 8, LIGHT.thruster.radius, LIGHT.thruster.color, LIGHT.thruster.intensity, LIGHT.thruster.wash);
+      }
       ctx.fillStyle = "rgba(255,157,46,0.85)";
       ctx.beginPath();
       ctx.moveTo(sx + w * 0.28, sy + h - 2);

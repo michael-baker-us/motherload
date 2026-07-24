@@ -21,6 +21,11 @@ export const LIGHT = {
   radius: 165, // headlamp / beacon light radius in world px (× zoom on screen)
   headlampTint: [255, 190, 110] as const, // warm wash inside the lamp halo
   beaconTint: [120, 230, 255] as const, // cool wash around the objective beacon
+  budget: 24, // max dynamic lights composited per frame (nearest-to-pod kept)
+  // Emissive world sources that carve their own light out of the darkness.
+  lava: { radius: 52, color: [255, 120, 30] as const, intensity: 0.8, wash: 0.16, flicker: 0.3, hz: 2.6 },
+  thruster: { radius: 72, color: [255, 170, 90] as const, intensity: 0.5, wash: 0.12 }, // engine glow lights the shaft below
+  digFlare: { radius: 40, color: [255, 200, 120] as const, intensity: 0.5, wash: 0.1 }, // the drill face lights up as it bites
 };
 
 /** 2.5D depth pass: cavity projection + flat per-face shading. */
