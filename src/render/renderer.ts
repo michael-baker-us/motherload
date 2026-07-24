@@ -1,5 +1,5 @@
 import { clamp, lerp } from "../engine/math";
-import { DEPTH, FX, LIGHT, POST, SLICE, TILE, VIEW } from "../game/config";
+import { DEPTH, FX, LIGHT, PHYSICS, POD_ANIM, POST, SLICE, TILE, VIEW } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
@@ -99,6 +99,9 @@ export class Renderer {
   private drillRecoil = 0;
   private lastDigDX = 0;
   private lastDigDY = 1;
+  // Landing suspension: spikes on a hard touchdown, springs back — the pod's
+  // shocks compressing under the impact.
+  private suspension = 0;
   // Screen transitions: a black fade that eases out on arrival in the world,
   // and a timer that paces the death screen's reveal instead of popping it.
   private prevState = "";
@@ -191,6 +194,12 @@ export class Renderer {
     this.shake = Math.max(0, this.shake - dt * 1.6);
     this.drillRecoil = Math.max(0, this.drillRecoil - dt * 7);
     this.flash = Math.max(0, this.flash - dt * 2.2);
+    // Suspension compresses on a hard landing (the sim reports the absorbed
+    // downward speed for one step), then springs back.
+    if (p.impactSpeed > 0) {
+      this.suspension = Math.max(this.suspension, clamp(p.impactSpeed / POD_ANIM.squashImpact, 0, 1));
+    }
+    this.suspension = Math.max(0, this.suspension - dt * POD_ANIM.squashRecover);
 
     // Depth darkness, computed before the world pass so the pod headlamp glow
     // and dust motes use this frame's value rather than last frame's.
@@ -383,6 +392,14 @@ export class Renderer {
         // Cashing in: a fountain of gold coins and a bold total.
         this.burst(e.x, e.y, 16, "#ffd75e", 150, -70, true);
         this.spawnFloat(e.x, e.y - 8, `+$${e.value.toLocaleString()}`, "#ffe07a", 18);
+      } else if (e.kind === "death") {
+        // The pod is lost: a violent flash and a spray of burning debris + hull
+        // shrapnel, with a big camera jolt.
+        this.burst(e.x, e.y, 30, "#ffd0a0", 250, 120, true);
+        this.burst(e.x, e.y, 22, "#ff6a3c", 210, 180, true);
+        this.burst(e.x, e.y, 18, "#8a8078", 150, 420, false);
+        this.shake = Math.max(this.shake, 0.95);
+        this.flash = Math.max(this.flash, 0.9);
       }
     }
     events.length = 0;
@@ -422,6 +439,26 @@ export class Renderer {
         additive: sparky,
       });
     }
+    // A wounded pod throws electrical sparks from the hull, more often the
+    // closer it is to being lost.
+    if (p.hull / p.maxHull < POD_ANIM.damageHull) {
+      const sev = 1 - p.hull / p.maxHull / POD_ANIM.damageHull;
+      if (Math.random() < (0.15 + sev * 0.5) * this.frameDt * 60) {
+        this.spawn({
+          x: px + p.width / 2 + (Math.random() - 0.5) * p.width,
+          y: py + p.height * (0.3 + Math.random() * 0.5),
+          vx: (Math.random() - 0.5) * 70,
+          vy: -20 - Math.random() * 40,
+          life: 0.3,
+          maxLife: 0.3,
+          size: 1 + Math.random(),
+          color: Math.random() > 0.4 ? "#ffe0a0" : "#ff7a4a",
+          gravity: 300,
+          additive: true,
+        });
+      }
+    }
+
     // Ambient embers drifting up through the magma biome — spawned across the
     // view floor and rising, so the air itself reads as hot.
     if (biomeAt(game.depth).name === "Magma Depths" && Math.random() < FX.embers.ratePerSec * this.frameDt) {
@@ -1029,6 +1066,20 @@ export class Renderer {
       sy -= this.lastDigDY * kick;
     }
 
+    // The pod reads as a machine reacting to its own motion: it banks into
+    // horizontal travel, its shocks compress on a hard landing, and it bobs
+    // faintly while airborne. One transform around the pod centre carries the
+    // whole rig (body, drill, thruster) together.
+    const bodyCx = sx + w / 2;
+    const bodyCy = sy + h / 2;
+    const bank = clamp(p.vx / PHYSICS.maxVx, -1, 1) * POD_ANIM.bank;
+    const bob = p.grounded ? 0 : Math.sin(this.time * POD_ANIM.bobHz * Math.PI * 2) * POD_ANIM.bobAmp;
+    ctx.save();
+    ctx.translate(bodyCx, bodyCy + bob);
+    ctx.rotate(bank);
+    ctx.scale(1 + this.suspension * 0.16, 1 - this.suspension * 0.26); // shocks compress: wider + shorter
+    ctx.translate(-bodyCx, -bodyCy);
+
     // Thruster flame: layered, flickering, glowing. The soft glow is emissive
     // (replayed after the darkness); the flame body stays here in the albedo
     // pass — it sits inside the pod's own headlamp halo, so it reads bright.
@@ -1215,6 +1266,20 @@ export class Renderer {
     if (this.darkness > 0.12) {
       this.emitters.push({ sprite: this.warmGlow, x: lampX - 16, y: lampY - 16, w: 32, h: 32, alpha: 0.55 * this.darkness });
     }
+
+    // Damage warning beacon: a red light on the hull roof blinks once the pod
+    // is badly hurt, urgency rising as the hull falls.
+    if (p.hull / p.maxHull < POD_ANIM.damageHull && game.state === "playing") {
+      const sev = 1 - p.hull / p.maxHull / POD_ANIM.damageHull; // 0 at threshold → 1 near death
+      const warn = 0.5 + 0.5 * Math.sin(this.time * (7 + sev * 10));
+      ctx.fillStyle = `rgba(255,60,40,${(0.35 + warn * 0.65).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(sx + w / 2, sy + 1, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      this.emitters.push({ sprite: this.warmGlow, x: sx + w / 2 - 9, y: sy + 1 - 9, w: 18, h: 18, alpha: warn * 0.4 });
+    }
+
+    ctx.restore();
   }
 
   /**

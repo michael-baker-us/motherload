@@ -44,6 +44,16 @@ export const FX = {
   heatHaze: { strength: 0.05, hz: 0.6 }, // subtle warm shimmer rising in the magma biome
 };
 
+/** Pod animation — the machine reacting to motion, landings, and damage. */
+export const POD_ANIM = {
+  bank: 0.16, // max banking tilt (radians) at full horizontal speed
+  squashImpact: 480, // downward impact speed (px/s) that yields full landing squash
+  squashRecover: 6, // how fast the suspension springs back (per second)
+  bobAmp: 0.9, // idle bob amplitude (px) while airborne
+  bobHz: 1.4, // idle bob rate
+  damageHull: 0.35, // hull fraction below which the warning light + sparks kick in
+};
+
 /** Post-processing: bloom bleed + full-screen washes. */
 export const POST = {
   bloom: {
