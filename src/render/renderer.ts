@@ -12,7 +12,7 @@ import { Hud } from "../ui/hud";
 import { bakeCrust, bakeEdge, bakeGlow, bakePuff } from "./bake";
 import { CameraFX } from "./camerafx";
 import { FONT_DISPLAY, FONT_UI } from "./fonts";
-import { iconCanvas, type IconId } from "./icons";
+import { type IconId } from "./icons";
 import { Lighting } from "./lighting";
 import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
@@ -377,7 +377,7 @@ export class Renderer {
     this.drawScanner(ctx, game, zoom); // reveals ore within scanner range, over the dark
 
     if (game.state === "title") {
-      this.drawTitleScreen(ctx, game);
+      this.drawTitleScreen(ctx);
       return;
     }
     if (game.state === "briefing") {
@@ -1882,7 +1882,12 @@ export class Renderer {
 
   // --- Screens -------------------------------------------------------------
 
-  private drawTitleScreen(ctx: CanvasRenderingContext2D, game: Game): void {
+  /**
+   * The title's *presentation* only — backdrop, logo, tagline. Everything the
+   * player can act on (start, new game, season, settings) is real, clickable
+   * DOM in `ui/title.ts`, drawn on top of this.
+   */
+  private drawTitleScreen(ctx: CanvasRenderingContext2D): void {
     const vw = ctx.canvas.clientWidth;
     const vh = ctx.canvas.clientHeight;
     const t = this.time;
@@ -1906,7 +1911,8 @@ export class Renderer {
     ctx.textBaseline = "middle";
 
     // Logo: bevelled, gold-gradient, softly glowing MOTHERLOAD.
-    const size = Math.min(74, vw / 8.2);
+    // Divisor keeps all ten letters inside the viewport on phone widths.
+    const size = Math.min(74, vw / 9.5);
     ctx.font = `900 ${size}px ${FONT_DISPLAY}`;
     ctx.letterSpacing = `${(size * 0.05).toFixed(1)}px`;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
@@ -1936,47 +1942,6 @@ export class Renderer {
     ctx.font = `11px ${FONT_UI}`;
     ctx.fillStyle = "rgba(140,200,255,0.7)";
     ctx.fillText("◈  PRE-ALPHA DEMO", cx, ly + size * 1.18);
-
-    // Menu prompts.
-    const py = vh * 0.63;
-    const prompt = 0.72 + 0.28 * Math.sin(t * 3);
-    ctx.font = `bold 20px ${FONT_UI}`;
-    ctx.fillStyle = `rgba(255,233,122,${prompt.toFixed(3)})`;
-    ctx.fillText(game.hasSave ? "▸  CONTINUE" : "▸  START DIGGING", cx, py);
-    ctx.font = `13px ${FONT_UI}`;
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.fillText("press  [ Enter ]", cx, py + 26);
-    if (game.hasSave) {
-      ctx.fillStyle = "rgba(216,201,184,0.8)";
-      ctx.fillText("[ N ]  new game  ·  overwrites save", cx, py + 50);
-    }
-
-    // Season picker. Only ever affects a *new* run — a continued save carries
-    // the season its world was generated under — so it's labelled as such.
-    const pick = SEASONS[game.titleSeason]!;
-    const sy = py + (game.hasSave ? 88 : 62);
-    ctx.font = `bold 9px ${FONT_UI}`;
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.letterSpacing = "3px";
-    ctx.fillText("NEW GAME SEASON", cx, sy);
-    ctx.letterSpacing = "0px";
-    const sicon = iconCanvas(pick.look.iconId as IconId, 18);
-    ctx.font = `bold 17px ${FONT_UI}`;
-    const nameW = ctx.measureText(pick.name.toUpperCase()).width;
-    ctx.drawImage(sicon, cx - nameW / 2 - 26, sy + 20, 18, 18);
-    ctx.fillStyle = pick.look.accent;
-    ctx.fillText(pick.name.toUpperCase(), cx, sy + 22);
-    ctx.font = `12px ${FONT_UI}`;
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.fillText(`◂  ${pick.tagline}  ▸`, cx, sy + 46);
-    ctx.font = `11px ${FONT_UI}`;
-    ctx.fillStyle = "rgba(255,255,255,0.3)";
-    ctx.fillText(pick.summary, cx, sy + 66);
-
-    // Controls, along the bottom.
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = `12px ${FONT_UI}`;
-    ctx.fillText("← →  move    ↑  thrust    ↓  drill    E  station", cx, vh - 28);
 
     ctx.textAlign = "left";
     ctx.textBaseline = "top";

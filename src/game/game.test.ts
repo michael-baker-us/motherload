@@ -4,6 +4,7 @@ import { ECONOMY, FUEL, SLICE, TILE } from "./config";
 import { Game } from "./game";
 import { FUEL_CELL_UNITS, ITEM_ORDER, ITEMS, REPAIR_KIT_HP } from "./items";
 import { spawnPoint } from "./player";
+import { gamePrefs } from "./prefs";
 import { TileId } from "./tiles";
 import { UPGRADES, type UpgradeTrack } from "./upgrades";
 import { BIOMES } from "./biomes";
@@ -285,6 +286,38 @@ describe("game state machine", () => {
     expect(second.player.maxFuel).toBe(160);
     expect(second.world.getTile(10, 6)).toBe(TileId.Empty);
     expect(second.world.tiles).toEqual(first.world.tiles);
+  });
+
+  it("arms the guided descent only when tutorials are switched on", () => {
+    const game = new Game(800, 600);
+    game.startNewGame();
+    expect(game.onboarding).toBeNull(); // tutorials default to off
+
+    gamePrefs.tutorials = true;
+    game.startNewGame();
+    expect(game.onboarding).not.toBeNull();
+    gamePrefs.tutorials = false;
+  });
+
+  it("quitToTitle banks the run so Continue can pick it back up", () => {
+    const storage = fakeStorage();
+    const game = makeGame(storage);
+    game.money = 777;
+    game.quitToTitle();
+    expect(game.state).toBe("title");
+    expect(game.hasSave).toBe(true);
+
+    const next = new Game(800, 600, storage);
+    expect(next.continueGame()).toBe(true);
+    expect(next.money).toBe(777);
+  });
+
+  it("wraps the title season picker in both directions", () => {
+    const game = new Game(800, 600);
+    game.pickTitleSeason(-1);
+    expect(game.titleSeason).toBe(SEASONS.length - 1);
+    game.pickTitleSeason(SEASONS.length);
+    expect(game.titleSeason).toBe(0);
   });
 
   it("continueGame without a save reports failure", () => {

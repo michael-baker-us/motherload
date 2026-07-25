@@ -20,6 +20,7 @@ import {
 } from "./items";
 import { isModuleId, MAX_MODULE_SLOTS, MODULE_ORDER, MODULES, type ModuleId } from "./modules";
 import { createPlayer, spawnPoint, type Player } from "./player";
+import { gamePrefs } from "./prefs";
 import { stepPlayer, type MoveInput } from "./physics";
 import {
   applyPlayerSave,
@@ -34,6 +35,7 @@ import {
   DEFAULT_SEASON,
   SEASONS,
   seasonById,
+  seasonIndexById,
   windAccelAt,
   type Season,
   type SeasonId,
@@ -117,6 +119,13 @@ export class Game {
   season: Season = seasonById(DEFAULT_SEASON);
   /** Season highlighted on the title screen — applies to the next new game. */
   titleSeason = 0;
+  /**
+   * True while the settings overlay is open *over* the title screen. The state
+   * stays `"title"` (the sim isn't running and the title backdrop keeps
+   * drawing); this only suspends the title screen's own key handling so Enter
+   * and ◂ ▸ don't leak through the panel.
+   */
+  titleSettingsOpen = false;
   /** Dev readout for balance tuning — a display toggle, not a cheat. */
   showTelemetry = false;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
@@ -188,7 +197,8 @@ export class Game {
     this.applyUpgrades(pod);
     this.player = pod;
     this.state = "briefing"; // a mission-brief card precedes the first descent
-    this.onboarding = new Onboarding();
+    // The guided descent is opt-in (settings menu) and off by default.
+    this.onboarding = gamePrefs.tutorials ? new Onboarding() : null;
     this.goalReached = false;
     this.runTime = 0;
     this.deaths = 0;
@@ -232,6 +242,34 @@ export class Game {
     return true;
   }
 
+  /** Highlight a season on the title screen; wraps, so ±1 steps the picker. */
+  pickTitleSeason(index: number): void {
+    this.titleSeason = ((index % SEASONS.length) + SEASONS.length) % SEASONS.length;
+  }
+
+  /**
+   * Leave the current run for the title screen (pause menu → "Quit to title").
+   * The run isn't discarded: it's autosaved on the way out, so the title's
+   * Continue picks it back up. A dev-tainted run just doesn't save, as ever.
+   */
+  quitToTitle(): void {
+    this.saveNow();
+    this.state = "title";
+    this.titleSeason = Math.max(0, seasonIndexById(this.season.id));
+  }
+
+  /**
+   * Open the settings overlay from the title screen. Same panel as the pause
+   * menu — `game.state === "title"` is what tells it to drop the run-only rows.
+   */
+  openTitleSettings(): void {
+    if (this.state !== "title" || this.titleSettingsOpen) return;
+    this.titleSettingsOpen = true;
+    this.menu.open(this, () => {
+      this.titleSettingsOpen = false;
+    });
+  }
+
   /**
    * True while any cheat is active or a one-shot dev action has run — shows the
    * HUD badge and blocks saving so a tinkered-with run never overwrites real progress.
@@ -265,11 +303,12 @@ export class Game {
     if (this.toast && (this.toast.timeLeft -= dt) <= 0) this.toast = null;
 
     if (this.state === "title") {
+      if (this.titleSettingsOpen) return; // the settings panel owns input
       // ◂ ▸ pick the season for the next new game (a continued run keeps its own).
       if (input.wasPressed("ArrowLeft")) {
-        this.titleSeason = (this.titleSeason + SEASONS.length - 1) % SEASONS.length;
+        this.pickTitleSeason(this.titleSeason - 1);
       } else if (input.wasPressed("ArrowRight")) {
-        this.titleSeason = (this.titleSeason + 1) % SEASONS.length;
+        this.pickTitleSeason(this.titleSeason + 1);
       } else if (input.wasPressed("Enter", "Space")) {
         if (!this.continueGame()) this.startNewGame();
       } else if (input.wasPressed("KeyN")) {

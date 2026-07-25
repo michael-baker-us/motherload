@@ -6,9 +6,11 @@ import { Loop } from "./engine/loop";
 import { Input } from "./engine/input";
 import * as config from "./game/config";
 import { Game } from "./game/game";
+import { loadGamePrefs } from "./game/prefs";
 import { loadViewPrefs } from "./render/prefs";
 import { Renderer } from "./render/renderer";
 import { showCrashScreen } from "./ui/crash";
+import { TitleOverlay } from "./ui/title";
 import { TouchControls } from "./ui/touchControls";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
@@ -19,6 +21,7 @@ if (!ctx) throw new Error("2d context unavailable");
 const input = new Input();
 input.attach(window);
 loadViewPrefs(window.localStorage);
+loadGamePrefs(window.localStorage);
 loadBindings(window.localStorage);
 
 const game = new Game(window.innerWidth, window.innerHeight, window.localStorage);
@@ -28,6 +31,10 @@ audio.attach(window);
 
 const touchControls = new TouchControls();
 touchControls.mount(input);
+
+// The title screen's buttons — canvas draws the logo, this layer is clickable.
+const titleOverlay = new TitleOverlay();
+titleOverlay.mount(game);
 
 // Dev-only handle for debugging and driving the game from the console/tests.
 if (import.meta.env.DEV) {
@@ -66,6 +73,7 @@ const loop = new Loop({
       // Audio reads fxEvents before the renderer drains them.
       audio.frame(game);
       renderer.render(ctx!, game, alpha);
+      titleOverlay.sync(game);
       touchControls.sync(game);
     } catch (e) {
       showCrashScreen(e);

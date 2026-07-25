@@ -41,7 +41,6 @@ export class TouchControls {
   private root: HTMLDivElement | null = null;
   private startOverlay!: HTMLDivElement;
   private startLabel!: HTMLDivElement;
-  private newGameBtn!: HTMLButtonElement;
   private steerCluster!: HTMLDivElement;
   private thrustBtn!: HTMLButtonElement;
   private interactBtn!: HTMLButtonElement;
@@ -60,10 +59,9 @@ export class TouchControls {
     document.body.appendChild(root);
     this.root = root;
 
-    const { overlay, label, newGameBtn } = this.buildStartOverlay(input);
+    const { overlay, label } = this.buildStartOverlay(input);
     this.startOverlay = overlay;
     this.startLabel = label;
-    this.newGameBtn = newGameBtn;
     root.appendChild(overlay);
 
     this.steerCluster = this.buildSteerCluster(input);
@@ -92,7 +90,9 @@ export class TouchControls {
   sync(game: Game): void {
     if (!this.root) return;
     const playing = game.state === "playing";
-    const waiting = game.state === "title" || game.state === "dead";
+    // The title screen has its own tappable buttons (ui/title.ts) — this
+    // tap-anywhere layer is only for the death screen's single prompt.
+    const waiting = game.state === "dead";
 
     this.steerCluster.style.display = playing ? "flex" : "none";
     this.thrustBtn.style.display = playing ? "flex" : "none";
@@ -102,13 +102,7 @@ export class TouchControls {
     this.startOverlay.style.display = waiting ? "flex" : "none";
 
     if (waiting) {
-      this.startLabel.textContent =
-        game.state === "dead"
-          ? "TAP TO LAUNCH REPLACEMENT POD"
-          : game.hasSave
-            ? "TAP TO CONTINUE"
-            : "TAP TO START DIGGING";
-      this.newGameBtn.style.display = game.state === "title" && game.hasSave ? "flex" : "none";
+      this.startLabel.textContent = "TAP TO LAUNCH REPLACEMENT POD";
       return;
     }
     if (!playing) return;
@@ -132,7 +126,7 @@ export class TouchControls {
 
   private buildStartOverlay(
     input: Input,
-  ): { overlay: HTMLDivElement; label: HTMLDivElement; newGameBtn: HTMLButtonElement } {
+  ): { overlay: HTMLDivElement; label: HTMLDivElement } {
     const overlay = document.createElement("div");
     overlay.style.cssText =
       "position:absolute;inset:0;display:none;flex-direction:column;align-items:center;" +
@@ -142,29 +136,13 @@ export class TouchControls {
       `color:#ffe97a;font-size:15px;font-weight:bold;letter-spacing:1px;font-family:${FONT_UI};` +
       `padding:14px 22px;border-radius:12px;background:${GLASS};border:1px solid ${BORDER};`;
     overlay.appendChild(label);
-    // The tap-anywhere zone must not swallow taps on the new-game button below it.
     overlay.addEventListener("pointerdown", (e) => {
-      if (e.target !== overlay && e.target !== label) return;
       e.preventDefault();
       input.press("Enter");
       input.release("Enter");
     });
 
-    const newGameBtn = document.createElement("button");
-    newGameBtn.textContent = "NEW GAME (overwrites save)";
-    newGameBtn.style.cssText =
-      `display:none;color:#d8c9b8;font-size:12px;font-family:${FONT_UI};` +
-      `padding:10px 18px;border-radius:10px;background:${GLASS};border:1px solid ${BORDER};` +
-      "pointer-events:auto;" + NO_SELECT;
-    newGameBtn.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      input.press("KeyN");
-      input.release("KeyN");
-    });
-    overlay.appendChild(newGameBtn);
-
-    return { overlay, label, newGameBtn };
+    return { overlay, label };
   }
 
   /** Bottom-left steering row: move/dig left, dig down, move/dig right. */

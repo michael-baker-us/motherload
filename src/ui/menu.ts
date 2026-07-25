@@ -10,6 +10,7 @@ import {
   type Action,
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
+import { gamePrefs, toggleTutorials } from "../game/prefs";
 import { SEASONS } from "../game/seasons";
 import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
 import { FONT_UI } from "../render/fonts";
@@ -37,6 +38,8 @@ export class MenuOverlay {
   private rebinding: Action | null = null;
   /** Whether the Dev·Testing group is expanded (collapsed by default). */
   private devOpen = false;
+  /** "New game" is armed and waiting for a confirming second click. */
+  private confirmingNew = false;
   private keyHandler = (e: KeyboardEvent): void => {
     // While rebinding, the next key press becomes the binding (Escape cancels).
     if (this.rebinding) {
@@ -72,8 +75,10 @@ export class MenuOverlay {
       "opacity:0;transition:opacity .18s ease, transform .18s ease;" +
       (viewPrefs.reducedMotion ? "" : "transform:translateY(10px) scale(0.985);");
 
+    // Same panel, two entry points: paused mid-run, or settings from the title.
+    const onTitle = game.state === "title";
     const title = document.createElement("div");
-    title.textContent = "⏸  PAUSED";
+    title.textContent = onTitle ? "⚙  SETTINGS" : "⏸  PAUSED";
     title.style.cssText =
       "font-size:15px;font-weight:bold;margin-bottom:6px;letter-spacing:2px;color:#cdd6e6;";
     panel.appendChild(title);
@@ -88,7 +93,7 @@ export class MenuOverlay {
     panel.appendChild(body);
 
     const hint = document.createElement("div");
-    hint.textContent = "[Esc] resume";
+    hint.textContent = onTitle ? "[Esc] back" : "[Esc] resume";
     hint.style.cssText = "margin-top:16px;color:#7f8ba3;font-size:11px;letter-spacing:0.5px;";
     panel.appendChild(hint);
 
@@ -105,6 +110,7 @@ export class MenuOverlay {
     this.body = body;
     this.game = game;
     this.rebinding = null;
+    this.confirmingNew = false;
     this.render(game);
   }
 
@@ -124,11 +130,26 @@ export class MenuOverlay {
   private render(game: Game): void {
     if (!this.body) return;
     this.body.replaceChildren();
+    // Opened from the title screen the same panel is a plain settings screen:
+    // there's no run to describe, restart, or cheat on.
+    const inRun = game.state !== "title";
 
-    // The run's season, read-only: it was fixed when the world was generated.
-    this.section("World");
-    this.line(`${game.season.name} · ${game.season.tagline}`, palette.amber);
-    this.line(game.season.summary, "rgba(255,255,255,0.5)");
+    if (inRun) {
+      // The run's season, read-only: it was fixed when the world was generated.
+      this.section("World");
+      this.line(`${game.season.name} · ${game.season.tagline}`, palette.amber);
+      this.line(game.season.summary, "rgba(255,255,255,0.5)");
+    }
+
+    this.section("Gameplay");
+    this.card({
+      icon: "?", title: "Tutorials", sub: "guided first descent",
+      actionLabel: gamePrefs.tutorials ? "ON" : "OFF", on: gamePrefs.tutorials,
+      onClick: () => { toggleTutorials(window.localStorage); this.render(game); },
+    });
+    // Onboarding is armed once, at startNewGame — say so rather than let a
+    // mid-run toggle look broken.
+    this.line("applies to the next new game", "rgba(255,255,255,0.4)");
 
     this.section("Display");
     this.card({
@@ -178,11 +199,37 @@ export class MenuOverlay {
       actionLabel: "Reset", onClick: () => { resetBindings(window.localStorage); this.render(game); },
     });
 
-    this.collapsibleSection("Dev · Testing", this.devOpen, () => {
-      this.devOpen = !this.devOpen;
-      this.render(game);
-    });
-    if (this.devOpen) {
+    if (inRun) {
+      this.section("Run");
+      // Both close the overlay first: close() resumes play via Game's onClose,
+      // and the call after it moves the state on from there.
+      this.card({
+        icon: "✦", title: "New game",
+        sub: this.confirmingNew ? "this replaces your saved run" : "fresh world · keeps nothing",
+        actionLabel: this.confirmingNew ? "Sure?" : "Restart", warn: this.confirmingNew,
+        onClick: () => {
+          // Two clicks — the pause menu is a bad place to lose a run by accident.
+          if (!this.confirmingNew) {
+            this.confirmingNew = true;
+            this.render(game);
+            return;
+          }
+          this.close();
+          game.startNewGame();
+        },
+      });
+      this.card({
+        icon: "⌂", title: "Quit to title", sub: "saves first · Continue picks it back up",
+        actionLabel: "Title",
+        onClick: () => { this.close(); game.quitToTitle(); },
+      });
+
+      this.collapsibleSection("Dev · Testing", this.devOpen, () => {
+        this.devOpen = !this.devOpen;
+        this.render(game);
+      });
+    }
+    if (inRun && this.devOpen) {
       for (const [cheat, label] of CHEAT_LABELS) {
         const on = game.cheats[cheat];
         this.card({
@@ -260,7 +307,7 @@ export class MenuOverlay {
     }
 
     this.section("");
-    this.resumeButton();
+    this.resumeButton(inRun ? "▶  Resume" : "◂  Back");
   }
 
   /** A small uppercase group heading spanning the full grid width. */
@@ -393,10 +440,10 @@ export class MenuOverlay {
     this.body?.appendChild(row);
   }
 
-  /** The prominent full-width resume action that closes the menu. */
-  private resumeButton(): void {
+  /** The prominent full-width action that closes the menu. */
+  private resumeButton(label: string): void {
     const btn = document.createElement("button");
-    btn.textContent = "▶  Resume";
+    btn.textContent = label;
     btn.style.cssText =
       `grid-column:1/-1;width:100%;margin-top:4px;padding:11px 16px;font-family:${FONT_UI};` +
       "font-size:14px;font-weight:bold;cursor:pointer;color:#fff;border:none;border-radius:10px;" +
