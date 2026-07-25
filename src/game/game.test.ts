@@ -299,6 +299,33 @@ describe("game state machine", () => {
     gamePrefs.tutorials = false;
   });
 
+  it("starts a sandbox run by default: no brief, no goal, no win screen", () => {
+    const game = new Game(800, 600);
+    game.startNewGame();
+    // Straight into the world, with nothing to reach.
+    expect(game.state).toBe("playing");
+    expect(game.objective()).toBeNull();
+
+    // Descending past the authored goal must not hijack the run.
+    game.devWarpToGoal();
+    game.update(1 / 60, new Input());
+    expect(game.state).toBe("playing");
+  });
+
+  it("arms the brief and the depth goal when the objective is switched on", () => {
+    const game = new Game(800, 600);
+    gamePrefs.objective = true;
+    game.startNewGame();
+    expect(game.state).toBe("briefing");
+
+    const input = new Input();
+    input.press("Enter");
+    game.update(1 / 60, input);
+    expect(game.state).toBe("playing");
+    expect(game.objective()).toEqual({ current: 0, target: SLICE.goalDepth });
+    gamePrefs.objective = false;
+  });
+
   it("quitToTitle banks the run so Continue can pick it back up", () => {
     const storage = fakeStorage();
     const game = makeGame(storage);

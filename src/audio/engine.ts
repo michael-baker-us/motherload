@@ -41,6 +41,31 @@ export function panFor(worldX: number, listenerX: number, halfWidth: number): nu
   return Math.max(-1, Math.min(1, (worldX - listenerX) / Math.max(1, halfWidth)));
 }
 
+/**
+ * iOS routes a bare AudioContext through the *ambient* audio session, which the
+ * hardware ring/silent switch mutes outright: the context reports `running`, the
+ * graph runs, `playedCount` climbs, and nothing reaches the speaker. Declaring
+ * the session as "playback" opts into the category music and video apps use,
+ * which ignores the switch.
+ *
+ * Affects every browser on iOS — Chrome and Firefox there are WebKit shells and
+ * share the same audio stack. Safari 16.4+; a no-op elsewhere, so it's safe to
+ * call unconditionally. The tradeoff is deliberate: "playback" takes over the
+ * audio session, so it interrupts music playing in another app.
+ *
+ * Exported for the unit test — nothing else should need to call it.
+ */
+export function claimPlaybackSession(nav: unknown = globalThis.navigator): void {
+  const session = (nav as { audioSession?: { type?: string } } | undefined)?.audioSession;
+  if (!session) return;
+  try {
+    session.type = "playback";
+  } catch {
+    // Read-only or unsupported value — the default session still plays with
+    // the ringer on, so this is a downgrade, not a failure.
+  }
+}
+
 let active: AudioEngine | null = null;
 
 /** The engine main.ts registered, if any — how DOM overlays reach audio controls. */
@@ -121,7 +146,9 @@ export class AudioEngine {
     target.addEventListener("pointerdown", unlock);
     target.addEventListener("touchend", unlock);
     target.document.addEventListener("visibilitychange", () => {
-      if (target.document.visibilityState === "visible") void this.ctx?.resume();
+      if (target.document.visibilityState !== "visible") return;
+      claimPlaybackSession();
+      void this.ctx?.resume();
     });
   }
 
@@ -295,6 +322,10 @@ export class AudioEngine {
   }
 
   private ensureContext(): void {
+    // Claimed before the context exists and again on every unlock: iOS drops the
+    // session back to its default after an interruption (a call, another app
+    // taking audio), and re-asserting here is what makes the game audible again.
+    claimPlaybackSession();
     if (this.ctx) {
       void this.ctx.resume();
       return;

@@ -10,7 +10,7 @@ import {
   type Action,
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
-import { gamePrefs, toggleTouchLayout, toggleTutorials } from "../game/prefs";
+import { gamePrefs, toggleObjective, toggleTouchLayout, toggleTutorials } from "../game/prefs";
 import { SEASONS } from "../game/seasons";
 import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
 import { FONT_UI } from "../render/fonts";
@@ -149,8 +149,14 @@ export class MenuOverlay {
       actionLabel: gamePrefs.tutorials ? "ON" : "OFF", on: gamePrefs.tutorials,
       onClick: () => { toggleTutorials(window.localStorage); this.render(game); },
     });
-    // Onboarding is armed once, at startNewGame — say so rather than let a
-    // mid-run toggle look broken.
+    this.card({
+      icon: "◈", title: "Anomaly objective",
+      sub: gamePrefs.objective ? "mission brief · depth goal" : "sandbox · dig where you like",
+      actionLabel: gamePrefs.objective ? "ON" : "OFF", on: gamePrefs.objective,
+      onClick: () => { toggleObjective(window.localStorage); this.render(game); },
+    });
+    // Both are armed once, at startNewGame — say so rather than let a mid-run
+    // toggle look broken.
     this.line("applies to the next new game", "rgba(255,255,255,0.4)");
     // Only meaningful where there are on-screen controls to reshape.
     if (layout.touch) {

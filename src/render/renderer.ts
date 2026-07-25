@@ -186,7 +186,12 @@ export class Renderer {
     // Fade up from black when arriving in the world (new game or respawn) so
     // the cut into play isn't abrupt; time the death screen's reveal.
     if (this.prevState !== game.state) {
-      if (game.state === "playing" && (this.prevState === "briefing" || this.prevState === "dead")) {
+      // "title" is in the list because a sandbox run (no mission brief) cuts
+      // straight from the title screen into the world.
+      if (
+        game.state === "playing" &&
+        (this.prevState === "briefing" || this.prevState === "dead" || this.prevState === "title")
+      ) {
         this.fade = 1;
       }
       this.deathT = 0;

@@ -6,7 +6,13 @@ import { ITEM_ORDER, ITEMS } from "../game/items";
 import { gamePrefs, type TouchLayout } from "../game/prefs";
 import { FONT_UI } from "../render/fonts";
 import { iconDataUrl } from "../render/icons";
-import { isTouchCapable, layout, TAP_MIN } from "./layout";
+import {
+  isTouchCapable,
+  itemsAsRow,
+  TAP_MIN,
+  TOUCH_EDGE,
+  TOUCH_ITEM_SIZE,
+} from "./layout";
 
 export { isTouchCapable };
 
@@ -31,8 +37,8 @@ const BUTTON_BASE =
 
 /** Safe-area-aware edge offsets, so nothing lands under a notch or home bar. */
 const EDGE = {
-  left: "calc(16px + env(safe-area-inset-left))",
-  right: "calc(16px + env(safe-area-inset-right))",
+  left: `calc(${TOUCH_EDGE}px + env(safe-area-inset-left))`,
+  right: `calc(${TOUCH_EDGE}px + env(safe-area-inset-right))`,
   bottom: "calc(20px + env(safe-area-inset-bottom))",
   top: "calc(12px + env(safe-area-inset-top))",
 };
@@ -61,12 +67,13 @@ const STICK_BASE = 132;
  *
  * Two schemes, switchable in the settings menu (`gamePrefs.touchLayout`):
  *
- *  - **stick** (default) — a floating thumbstick materialises wherever the left
- *    thumb lands in the lower-left of the screen and steers, thrusts and drills
- *    from that one contact. Nothing is anchored, so it fits every hand and
- *    every phone, and diagonals (thrust + steer) come free.
- *  - **pad** — the classic fixed ◀ ▼ ▶ cluster for players who want the
- *    certainty of a button under the thumb.
+ *  - **pad** (default) — the classic fixed ◀ ▼ ▶ cluster, for the certainty of
+ *    a discrete button under the thumb. Suits a grid game, where "dig down"
+ *    is a commitment to one direction rather than an analogue lean.
+ *  - **stick** — a floating thumbstick materialises wherever the left thumb
+ *    lands in the lower-left of the screen and steers, thrusts and drills from
+ *    that one contact. Nothing is anchored, so it fits every hand and every
+ *    phone, and diagonals (thrust + steer) come free.
  *
  * The right thumb keeps a dedicated THRUST pad in both schemes: this is a game
  * about holding thrust, and a thumb on a button does that better than a thumb
@@ -390,7 +397,8 @@ export class TouchControls {
     this.itemBtns = ITEM_ORDER.map((id, i) => {
       const btn = this.tapButton("", `Digit${i + 1}`, input, ITEMS[id].name);
       btn.style.cssText +=
-        `width:${TAP_MIN + 8}px;height:${TAP_MIN + 8}px;border-radius:14px;flex-direction:column;gap:1px;`;
+        `width:${TOUCH_ITEM_SIZE}px;height:${TOUCH_ITEM_SIZE}px;border-radius:14px;` +
+        "flex-direction:column;gap:1px;";
       btn.innerHTML =
         `<img src="${iconDataUrl(id, 22)}" alt="${ITEMS[id].name}" ` +
         'style="width:22px;height:22px;pointer-events:none">' +
@@ -414,7 +422,9 @@ export class TouchControls {
     // back to the static position and cover the stats panel.
     const el = this.itemsCluster;
     if (!el) return;
-    const short = layout.vh < 520;
+    // `itemsAsRow` lives in layout.ts because the canvas HUD reads it too, to
+    // know which screen edge it must keep its banners out of.
+    const short = itemsAsRow();
     if (short === this.itemsShort) return;
     this.itemsShort = short;
     el.style.flexDirection = short ? "row" : "column";

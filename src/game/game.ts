@@ -196,10 +196,15 @@ export class Game {
     const pod = createPlayer(this.world);
     this.applyUpgrades(pod);
     this.player = pod;
-    this.state = "briefing"; // a mission-brief card precedes the first descent
+    // Both the mission-brief card and the anomaly goal are opt-in (settings
+    // menu), off by default. Without them this is a sandbox: drop straight into
+    // the world, and treat the goal as already met so neither the progress
+    // banner nor the "won" screen ever appears.
+    this.state = gamePrefs.objective ? "briefing" : "playing";
+    if (this.state === "playing") this.announceSeason();
     // The guided descent is opt-in (settings menu) and off by default.
     this.onboarding = gamePrefs.tutorials ? new Onboarding() : null;
-    this.goalReached = false;
+    this.goalReached = !gamePrefs.objective;
     this.runTime = 0;
     this.deaths = 0;
     this.maxDepth = 0;
@@ -319,8 +324,7 @@ export class Game {
     if (this.state === "briefing") {
       if (input.wasPressed("Enter", "Space")) {
         this.state = "playing";
-        // Name the season the way biomes name themselves on first entry.
-        this.showToast(`◈ ${this.season.name.toUpperCase()} · ${this.season.tagline}`, 3.5);
+        this.announceSeason();
       }
       return;
     }
@@ -684,6 +688,15 @@ export class Game {
   onboardingHint(): OnboardPrompt | null {
     if (this.state !== "playing") return null;
     return this.onboarding?.prompt ?? null;
+  }
+
+  /**
+   * Name the season the way biomes name themselves on first entry. Fired when
+   * the run actually starts — leaving the brief card, or immediately when
+   * there's no card to leave.
+   */
+  private announceSeason(): void {
+    this.showToast(`◈ ${this.season.name.toUpperCase()} · ${this.season.tagline}`, 3.5);
   }
 
   /** Live objective for the HUD while the goal is pending; null otherwise. */

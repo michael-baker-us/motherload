@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { panFor } from "./engine";
+import { claimPlaybackSession, panFor } from "./engine";
+
+describe("iOS audio session", () => {
+  it("claims the playback category when the browser exposes one", () => {
+    const nav = { audioSession: { type: "auto" } };
+    claimPlaybackSession(nav);
+    // "playback" is the category that ignores the hardware ring/silent switch.
+    expect(nav.audioSession.type).toBe("playback");
+  });
+
+  it("is a no-op where the Audio Session API is absent", () => {
+    expect(() => claimPlaybackSession({})).not.toThrow();
+    expect(() => claimPlaybackSession(undefined)).not.toThrow();
+  });
+
+  it("survives a read-only session type rather than killing audio setup", () => {
+    const nav = { audioSession: {} };
+    Object.defineProperty(nav.audioSession, "type", {
+      get: () => "auto",
+      set: () => {
+        throw new TypeError("read only");
+      },
+    });
+    expect(() => claimPlaybackSession(nav)).not.toThrow();
+  });
+});
 
 describe("stereo pan", () => {
   it("centers on the listener and pans with world offset", () => {

@@ -85,6 +85,33 @@ function readSafeInsets(): SafeInsets {
 /** Minimum comfortable tap target. Below ~44px, fingers miss. */
 export const TAP_MIN = 44;
 
+/** Edge length of one consumable button in the touch cluster. */
+export const TOUCH_ITEM_SIZE = TAP_MIN + 8;
+
+/** Margin every touch control keeps from the screen edge, before safe insets. */
+export const TOUCH_EDGE = 16;
+
+/**
+ * True when the consumables cluster lays out as a row along the top rather than
+ * a column down the right edge — a short (landscape) screen has no room for the
+ * column beside the station and thrust keys.
+ */
+export function itemsAsRow(): boolean {
+  return layout.vh < 520;
+}
+
+/**
+ * Screen edges the on-screen touch controls occupy, in CSS pixels, which the
+ * canvas UI must not draw into. The HUD's banners are centred in what's left,
+ * so a toast or objective card never slides under the consumable buttons.
+ * All zero when no touch controls are mounted.
+ */
+export function touchReserve(): { top: number; right: number } {
+  if (!layout.touch) return { top: 0, right: 0 };
+  const span = TOUCH_EDGE + TOUCH_ITEM_SIZE;
+  return itemsAsRow() ? { top: span, right: 0 } : { top: 0, right: span };
+}
+
 /** Full-screen dim behind an overlay panel, inset for display cutouts. */
 export function overlayRootCss(font: string): string {
   return (

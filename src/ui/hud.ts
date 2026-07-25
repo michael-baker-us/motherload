@@ -5,7 +5,7 @@ import { FONT_UI } from "../render/fonts";
 import { iconCanvas, type IconId } from "../render/icons";
 import { alpha, palette } from "../render/palette";
 import { fitFontSize, wrapText } from "../render/text";
-import { layout } from "./layout";
+import { layout, touchReserve } from "./layout";
 
 export interface HudData {
   depth: number;
@@ -195,12 +195,20 @@ export class Hud {
     // in portrait), and never on top of each other.
     const panelBottom = 12 + PANEL_H + (data.dev ? 30 : 8);
     const roomBeside = viewW - PANEL_W - 36 >= 300;
+    // On touch the consumable buttons are DOM elements sitting over the canvas,
+    // and the canvas UI has no other way to know they're there. Treat the edge
+    // they occupy as unusable so a banner is never drawn underneath them.
+    const reserve = touchReserve();
+    const gutterRight = reserve.right / layout.scale;
+    const gutterTop = reserve.top / layout.scale;
+    /** Right edge the top stack may use, once the touch controls take their cut. */
+    const usableW = viewW - gutterRight;
     /** Centre `w`, but push clear of the panel when the row is level with it. */
     const centred = (w: number, y: number): number => {
       const min = y < panelBottom ? PANEL_W + 24 : 12;
-      return Math.round(Math.max(min, Math.min((viewW - w) / 2, viewW - w - 12)));
+      return Math.round(Math.max(min, Math.min((usableW - w) / 2, usableW - w - 12)));
     };
-    let stackY = roomBeside ? 6 : panelBottom;
+    let stackY = roomBeside ? Math.max(6, gutterTop + 8) : panelBottom;
 
     // Toast: slides down and fades out. Shrinks to fit rather than running off
     // the sides — some toasts are long ("◈ AUTUMN · THE TURNING").
@@ -208,7 +216,7 @@ export class Hud {
       const shown = data.toast.total - data.toast.timeLeft;
       const slide = 1 - Math.pow(1 - clamp(shown / 0.18, 0, 1), 3);
       ctx.globalAlpha = Math.min(1, data.toast.timeLeft) * slide;
-      const size = fitFontSize(15, 10, viewW - PANEL_W - 80, (px) => {
+      const size = fitFontSize(15, 10, usableW - PANEL_W - 80, (px) => {
         ctx.font = `bold ${px}px ${MONO}`;
         return ctx.measureText(data.toast!.text).width;
       });
@@ -233,7 +241,7 @@ export class Hud {
     if (data.onboarding) {
       const o = data.onboarding;
       const label = `GETTING STARTED · ${o.step}/${o.total}`;
-      const maxTextW = Math.min(viewW - (roomBeside ? 48 : 60), 520);
+      const maxTextW = Math.min(usableW - (roomBeside ? 48 : 60), 520);
       ctx.font = `bold 14px ${MONO}`;
       const lines = wrapText(o.text, maxTextW, (t) => ctx.measureText(t).width);
       const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
@@ -258,46 +266,40 @@ export class Hud {
       stackY = cardY + cardH + 8;
     }
 
-    // Vertical-slice objective banner with a depth progress bar.
+    // Vertical-slice objective: a slim one-line pill. It's on screen for a whole
+    // descent, so it stays out of the way — the progress is the pill's own fill
+    // rather than a separate bar, and it's sized to its text instead of holding
+    // a 300px minimum across the top of the screen.
     if (data.objective) {
       const o = data.objective;
-      const label = "◈ REACH THE ANOMALY";
-      const prog = `${Math.min(o.current, o.target)} / ${o.target} m`;
-      ctx.font = `bold 12px ${MONO}`;
-      const cardW = Math.min(
-        viewW - 24,
-        Math.max(ctx.measureText(label).width + ctx.measureText(prog).width + 60, 300),
-      );
-      const cardY = Math.round(roomBeside ? Math.max(stackY, viewH * 0.13) : stackY);
-      const cardX = centred(cardW, cardY);
-      ctx.fillStyle = "rgba(10,12,16,0.82)";
-      ctx.beginPath();
-      ctx.roundRect(cardX, cardY, cardW, 42, 12);
-      ctx.fill();
-      ctx.strokeStyle = alpha(palette.anomaly, 0.4);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = palette.anomaly;
-      ctx.fillText(label, cardX + 18, cardY + 9);
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.textAlign = "right";
-      ctx.fillText(prog, cardX + cardW - 18, cardY + 9);
-      ctx.textAlign = "left";
-      // progress track + fill
-      const barX = cardX + 18;
-      const barW = cardW - 36;
+      const text = `◈ ANOMALY  ${Math.min(o.current, o.target)} / ${o.target} m`;
+      ctx.font = `bold 11px ${MONO}`;
+      const pillH = 22;
+      const pillW = Math.min(usableW - 24, ctx.measureText(text).width + 28);
+      const pillY = Math.round(roomBeside ? Math.max(stackY, viewH * 0.13) : stackY);
+      const pillX = centred(pillW, pillY);
       const frac = clamp(o.current / o.target, 0, 1);
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
+
+      ctx.save();
       ctx.beginPath();
-      ctx.roundRect(barX, cardY + 28, barW, 6, 3);
+      ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
+      ctx.fillStyle = "rgba(10,12,16,0.7)";
       ctx.fill();
+      // Progress reads as the pill filling up from the left.
       if (frac > 0.01) {
-        ctx.fillStyle = palette.anomalyDim;
-        ctx.beginPath();
-        ctx.roundRect(barX, cardY + 28, barW * frac, 6, 3);
-        ctx.fill();
+        ctx.clip();
+        ctx.fillStyle = alpha(palette.anomalyDim, 0.35);
+        ctx.fillRect(pillX, pillY, pillW * frac, pillH);
       }
-      stackY = cardY + 50;
+      ctx.restore();
+      ctx.strokeStyle = alpha(palette.anomaly, 0.3);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
+      ctx.stroke();
+      ctx.fillStyle = alpha(palette.anomaly, 0.9);
+      ctx.fillText(text, pillX + 14, pillY + 6);
+      stackY = pillY + pillH + 8;
     }
 
     // Station prompt. On touch the bottom of the screen belongs to the

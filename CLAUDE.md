@@ -83,9 +83,12 @@ Enter. Reading this method top-to-bottom is the fastest way to understand how
 a frame flows.
 
 The `"won"` screen is the vertical-slice payoff: descend to `SLICE.goalDepth`
-(config) and reach the authored `world.anomaly` set-piece. `game.ts` also
-exposes `devWarpTo*` and other `dev*` test helpers — see the dev-tools note
-under the save system.
+(config) and reach the authored `world.anomaly` set-piece. That whole arc is
+**opt-in** — `gamePrefs.objective` (settings menu, default off) gates the
+`"briefing"` card, the HUD progress banner and the payoff together. A default
+run is a sandbox: `startNewGame` goes straight to `"playing"` and sets
+`goalReached` so nothing ever fires. `game.ts` also exposes `devWarpTo*` and
+other `dev*` test helpers — see the dev-tools note under the save system.
 
 **One-shot effects go through `fxEvents`**: `Game.pushFx()` queues
 `{kind, x, y, ...}` in world coordinates; `AudioEngine.frame()` reads the
