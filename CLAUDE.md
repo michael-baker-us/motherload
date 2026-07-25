@@ -22,8 +22,9 @@ npm run preview      # serve the production build
 ```
 
 Run a single test file: `npx vitest run src/game/physics.test.ts`.
-Every `src/game/*.ts` module has a matching `*.test.ts` beside it — that's
-where all unit tests live (no separate `test/` tree).
+Tests live beside the module they cover (`*.test.ts`), not in a separate
+`test/` tree — near-total coverage in `game/`, plus the framework-free parts
+of `engine/`, `render/`, `audio/`, and `ui/layout.ts`.
 
 CI (`.github/workflows/ci.yml`) runs `npm test` then `npm run build` on every
 push/PR, and deploys `dist/` to GitHub Pages on pushes to `main`. There is no
@@ -33,11 +34,11 @@ separate lint job — type-checking via `tsc --noEmit` is the only static gate.
 
 ```text
 src/
-  engine/   game-agnostic: fixed-timestep loop, input, camera, math
-  render/   all drawing: pre-rendered tile textures, particles, lighting, sky
+  engine/   game-agnostic: fixed-timestep loop, input + key bindings, camera, math
+  render/   all drawing: baked tile art, lighting, post-FX, sky, weather, particles
   audio/    procedural sound engine + persisted audio settings
   game/     all simulation logic — pure of DOM/canvas, unit-tested
-  ui/       HUD, title/shop/menu overlays, on-screen touch controls
+  ui/       HUD, title/shop/menu overlays, touch controls, crash screen
 ```
 
 **The core rule**: `game/` modules never touch the DOM or canvas — they're
@@ -55,25 +56,34 @@ also share their panel/button CSS from there so phone sizing is applied once.
 Anything new that positions itself on screen should read `layout`, not
 `window.innerWidth`.
 
-**Tuning lives in one place.** `game/config.ts` holds every game-feel and
-balance number (physics, fuel burn, hazard chances, prices, heat) grouped
-into named consts (`PHYSICS`, `FUEL`, `ECONOMY`, `DRILL`, `HAZARDS`, `HEAT`,
-...). When adjusting game feel, edit `config.ts`, not the module that consumes
-it.
+**Tuning lives in one place.** `game/config.ts` holds every game-feel, balance
+*and visual* number grouped into named consts — sim (`PHYSICS`, `POD`, `FUEL`,
+`ECONOMY`, `DRILL`, `HAZARDS`, `HEAT`, `WORLDGEN`, `SLICE`) and render
+(`VIEW`, `LIGHT`, `DEPTH`, `FX`, `CAMERA`, `POD_ANIM`, `POST`, `SEASON`).
+When adjusting game feel or look, edit `config.ts`, not the module that
+consumes it. Dev builds expose the whole module as `window.__config`, so these
+are live-tunable from the console.
 
 ### Fixed-timestep loop
 
 `engine/loop.ts` runs simulation at a fixed `STEP = 1/60` via an accumulator,
 decoupled from render rate; `render(alpha)` gets the leftover fraction for
 interpolation. `main.ts` wires `Loop` to `Game.update()` / `Renderer.render()`
-and is the composition root — canvas setup, DPR scaling, resize handling, and
-constructing `Input`, `Game`, `Renderer`, `AudioEngine` all happen there. In
-dev builds it exposes `window.__game` and `window.__audio` for
-console-driving and the `verify` skill.
+and is the composition root — canvas setup, DPR scaling, resize handling,
+loading every persisted preference bundle, and constructing `Input`, `Game`,
+`Renderer`, `AudioEngine`, `TouchControls`, `TitleOverlay` all happen there.
+It also owns the error boundary: `update`/`render` are wrapped in try/catch
+and any throw (plus `window.onerror`/`unhandledrejection`) routes to
+`ui/crash.ts`, which shows a recoverable overlay rather than freezing on a
+black canvas — the save is left intact, with a second button to clear it in
+case a corrupt save is what crashes on load. In dev builds it exposes
+`window.__game`, `__audio`, `__renderer`, and `__config` for console-driving
+and the `verify` skill.
 
 ### `Game` (`game/game.ts`) is the state machine and hub
 
-Owns `world`, `player`, `camera`, `money`, `upgrades`, modules, and `state`
+Owns `world`, `player`, `camera`, `money`, `upgrades`, modules, `season`, and
+`state`
 (`"title" | "briefing" | "playing" | "shop" | "menu" | "dead" | "won"`).
 `update(dt, input)` is a single big dispatch on `state` — most game logic
 (movement, drilling, heat, damage, consumables, stations, autosave) only runs
@@ -108,16 +118,61 @@ since generation — `setTile`/`blast` write through this map, but the initial
 Out-of-bounds reads return `Rock`, so edges behave like bedrock without
 special-casing.
 
-### Save system
+### Seasons — per-run identity
 
-`game/save.ts` captures `{version, seed, tiles (diff), player, money,
-upgrades}` and reconstructs by re-running worldgen from the seed then
-replaying the tile diff — never stores the full grid. `SaveStorage` is a
+`game/seasons.ts` is the largest content table and the one with the sharpest
+invariant. A season (spring/summer/autumn/winter) layers a distinct sky,
+treeline, colour grade, weather, ambience, topsoil and small gameplay
+modifiers over the depth biomes and material strata. It is **chosen at new
+game and fixed for that run**, and the `Season` interface splits its effects
+into two fields for exactly that reason:
+
+- **`world`** — baked into terrain at `World` construction, read *once* in
+  `world.ts`'s `rollTile`, and captured in the save alongside the seed.
+  Because loading re-runs worldgen from the seed, changing this mid-run would
+  silently mutate untouched terrain across a save/load.
+- **`runtime`** — read fresh every sim step (ambient heat, cooling, burn,
+  gust). Safe to change any time; the dev season switcher (`devSetSeason`)
+  only touches this half plus the visuals.
+
+Everything downstream — sky, flora, grade, weather, audio voice, HUD chip,
+title picker — is table-driven off this row, and `seasons.test.ts` /
+`render/seasons-render.test.ts` fail loudly if a new row references an icon,
+weather kind or voice that doesn't exist. Adding a fifth season should be
+appending a row. Note the title screen previews `SEASONS[game.titleSeason]`
+live behind the picker, so the renderer resolves "the season to draw" per
+frame rather than reading `game.season` unconditionally.
+
+### Save system and persisted preferences
+
+`game/save.ts` captures `{version, seed, season, tiles (diff), player, money,
+upgrades, modules}` and reconstructs by re-running worldgen from the seed then
+replaying the tile diff — never stores the full grid. `season` is stored as a
+*worldgen input on a par with `seed`*, not as a cosmetic label: the same seed
+under a different season rebuilds different terrain. `SaveStorage` is a
 minimal `getItem/setItem/removeItem` interface (not `localStorage` directly)
 so tests use a plain object and a future native build can swap in file
-storage. Saves are versioned; loaders sanitize missing fields (e.g. `items`)
-for forward compatibility with older saves — e.g. a save written before a new
-upgrade track existed loads with that track at tier 0.
+storage. Saves are versioned with a `MIGRATIONS` table keyed by the version
+each step upgrades *from*: bump `CURRENT_SAVE_VERSION` and add a step rather
+than silently wiping old saves. A save from a *newer* build is left untouched
+instead of being guessed at, and loaders sanitize missing fields (e.g.
+`items`) so a save written before a new upgrade track existed loads with that
+track at tier 0.
+
+Preferences that outlive a run are *not* in the save — they're four separate
+`localStorage` keys, each a mutable module singleton loaded once by `main.ts`
+and read directly by its consumers (deliberate: the menu writes, the renderer
+or `Game` reads, no reference threaded through both):
+
+| Module | Key | Holds |
+| --- | --- | --- |
+| `game/prefs.ts` | `motherload-prefs` | `tutorials`, `objective`, `touchLayout` |
+| `render/prefs.ts` | `motherload-view` | `depth`, `reducedMotion`, `headlampBeam` |
+| `audio/settings.ts` | `motherload-audio` | volumes / mute |
+| `engine/bindings.ts` | `motherload-keys` | rebindable action → key codes |
+
+`reducedMotion` defaults from the OS `prefers-reduced-motion` and suppresses
+camera shake and full-screen flashes; honour it in any new screen-level effect.
 
 **Dev tools must never corrupt a real save.** `Game.saveNow()` is a no-op
 whenever `devMode` is true, and `devMode` is true if *any* `DevCheats` toggle
@@ -160,15 +215,74 @@ not the consumer:
 - **Heat** (`game/heat.ts`): pure `stepHeat` — a second resource axis. Depth/
   biome push it up, the radiator (coolant upgrade) sheds it faster near the
   surface; overheating cooks the hull.
+- **Seasons** (`game/seasons.ts`): the per-run surface identity — see above.
+- **Onboarding** (`game/onboarding.ts`): a step list watching `{depth,
+  cargoUnits, soldCargo}`; each step advances when its `done()` predicate
+  passes. Non-blocking by design — it never gates input, the renderer just
+  draws the current prompt, and it's only armed for a fresh run with
+  `gamePrefs.tutorials` on.
+
+### Input and controls
+
+`engine/input.ts` tracks raw key state; `engine/bindings.ts` maps the five
+rebindable actions (`thrust`/`left`/`right`/`drill`/`interact`) onto key codes,
+each with several defaults (arrows + WASD). System keys — Esc, Enter, 1–4 —
+stay fixed and are read directly. Gameplay code should ask about *actions*,
+not `ArrowUp`.
+
+Touch is a first-class path, not an afterthought: `ui/touchControls.ts` owns
+the pointer events and drawing for two schemes selected by
+`gamePrefs.touchLayout` — a fixed D-pad (default, because drilling wants a
+discrete "dig down" under the thumb) or a floating thumbstick. The stick's
+*feel* — dead zone, travel, which tilt means which held directions — is pure
+math in `engine/stick.ts` (DOM-free and unit-tested), resolving to a set of
+held directions rather than an analog vector, since pod movement is discrete.
+
+### Render pipeline
+
+`render/renderer.ts` is the biggest file in the repo and its `render()` runs a
+fixed sequence of passes. Knowing the order is what makes a visual change land
+in the right place:
+
+1. **Effects + camera** — drain `fxEvents`, emit continuous FX, step particles,
+   then `camerafx.ts` writes `cam.x/y` plus this frame's zoom and shake.
+2. **World albedo** (zoomed + shaken, opaque only) — `sky.ts` → tiles →
+   stations → pod → non-additive particles. The pass *collects* lights and
+   emissive glows into arrays instead of drawing them inline.
+3. **Biome mood wash** — albedo-space tint, pre-lighting.
+4. **Lighting** (`lighting.ts`) — fills the frame with fog colour at the
+   current darkness, punches a soft hole per light, washes each light's colour
+   back in. Dynamic lights are budgeted by distance to the pod, with slots
+   reserved for the headlamp and beacon. `lights.ts` holds the (testable) pure
+   math and the `Light`/`Emitter` vocabulary.
+5. **Depth haze** → **emissive pass** (additive glows over the darkness) →
+   **bloom** (`postfx.ts`, blurred in a downscaled buffer) → **heat shimmer**.
+6. **Season colour grade** — graded over the *composited* frame, fading out
+   with depth so the deep reads as the biome's; then weather tint, vignette,
+   damage flash, HUD, arrival fade.
+
+Supporting modules: `bake.ts` bakes one-time gradient sprites (holes, beams,
+edge shadows, flecks) so nothing rebuilds a `CanvasGradient` per frame —
+follow that pattern for new decals; `tileart.ts` pre-renders tile textures at
+2× supersample; `weather.ts` spawns seasonal surface particles through the
+same `spawn` callback every other effect uses; `text.ts`, `fonts.ts`, and
+`icons.ts` cover canvas text wrapping, shared font stacks, and procedural
+icons.
 
 ### Testing conventions
 
 Vitest with `environment: "node"` (see `vite.config.ts`) — no DOM/canvas
 available in unit tests, which is exactly why simulation code must stay
-framework-free. Tests exercise `game/` modules directly (physics steps,
-drilling progress, save round-trips, economy math) rather than through the
-`Game` facade or a rendered surface.
+framework-free. Tests exercise modules directly (physics steps, drilling
+progress, save round-trips, economy math, stick tilt, layout breakpoints)
+rather than through the `Game` facade or a rendered surface. When a render
+concern *is* worth testing, the pattern is to extract the math into a DOM-free
+module beside it — `render/lights.ts` and `engine/stick.ts` exist in that shape
+for exactly this reason.
 
 To verify a change visually (not just via unit tests), use the **`verify`**
 skill — it builds, launches the dev server, and drives the game with
 Playwright against `window.__game`.
+
+The `docs/screenshots/` images in the README are captured with that same setup —
+regenerate them by driving the game rather than by hand-editing images.
