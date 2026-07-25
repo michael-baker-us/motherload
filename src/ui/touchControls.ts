@@ -126,6 +126,7 @@ export class TouchControls {
     root.appendChild(this.interactBtn);
 
     this.itemsCluster = this.buildItemsCluster(input);
+    this.placeItems(); // needs the field assigned first — see placeItems
     root.appendChild(this.itemsCluster);
 
     this.pauseBtn = this.tapButton("⏸", "Escape", input, "menu");
@@ -397,7 +398,6 @@ export class TouchControls {
       el.appendChild(btn);
       return btn;
     });
-    this.placeItems();
     return el;
   }
 
@@ -408,11 +408,15 @@ export class TouchControls {
    * becomes a row along the top instead, beside the pause button.
    */
   private placeItems(): void {
+    // Guard before the memo, not after: `buildItemsCluster` calls this before
+    // `mount` has assigned `itemsCluster`, and recording the placement while
+    // bailing out would leave the cluster unpositioned forever — it would fall
+    // back to the static position and cover the stats panel.
+    const el = this.itemsCluster;
+    if (!el) return;
     const short = layout.vh < 520;
     if (short === this.itemsShort) return;
     this.itemsShort = short;
-    const el = this.itemsCluster;
-    if (!el) return;
     el.style.flexDirection = short ? "row" : "column";
     el.style.top = short ? EDGE.top : `calc(${EDGE.top} + 56px)`;
     el.style.right = short ? `calc(${EDGE.right} + ${TAP_MIN + 10}px)` : EDGE.right;
