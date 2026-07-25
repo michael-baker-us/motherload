@@ -1016,7 +1016,17 @@ export class Renderer {
           // Cavity walls take the same seasonal earth as the tiles around them,
           // or a dug shaft would show plain brown sides against frosted faces.
           const soil = this.soilStep(ty - world.surfaceRow);
-          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py, up === TileId.Dirt ? soil : 0);
+          if (TILE_DEFS[up].solid) {
+            this.face(ctx, sx, sy, sx + TILE, sy, up, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py, up === TileId.Dirt ? soil : 0);
+          } else if (up === TileId.Sky) {
+            // A shaft mouth broken through the surface has no tile above it to
+            // cast a ceiling, so the gap between the mouth and the receded back
+            // wall showed raw sky through the hole. Cap it with the surrounding
+            // stratum, shaded like a ceiling, so the mouth reads as an opening
+            // into shadow continuous with the shaft below.
+            const rim = stratumAt(ty - world.surfaceRow);
+            this.face(ctx, sx, sy, sx + TILE, sy, rim, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py, rim === TileId.Dirt ? soil : 0);
+          }
           if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, this.faceLight(DEPTH.face.floor, podRow < ty, tx, ty, podCol, podRow), px, py, down === TileId.Dirt ? soil : 0);
           if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, this.faceLight(DEPTH.face.wall, podCol > tx, tx, ty, podCol, podRow), px, py, left === TileId.Dirt ? soil : 0);
           if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, this.faceLight(DEPTH.face.wall, podCol < tx, tx, ty, podCol, podRow), px, py, right === TileId.Dirt ? soil : 0);
