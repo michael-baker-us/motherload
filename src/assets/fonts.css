@@ -1,0 +1,17 @@
+/* Self-hosted UI fonts (SIL Open Font License).
+ * Share Tech Mono — techy monospace, keeps numeric-readout alignment.
+ * Orbitron — wide display face for titles/headers. */
+@font-face {
+  font-family: "Share Tech Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/share-tech-mono.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("./fonts/orbitron-800.ttf") format("truetype");
+}

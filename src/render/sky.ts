@@ -1,6 +1,7 @@
 import { clamp } from "../engine/math";
 import { mulberry32 } from "../game/rng";
 import type { Camera } from "../engine/camera";
+import { bakePuff } from "./bake";
 
 interface Star {
   u: number;
@@ -26,6 +27,14 @@ interface Ridge {
   base: number;
 }
 
+interface Structure {
+  u: number;
+  type: number; // 0 derrick · 1 smokestack · 2 tank · 3 crane
+  scale: number;
+  lit: number; // 0..1 seed for window lights
+  blink: number; // phase offset for the aviation beacon
+}
+
 /**
  * The dusk skybox: gradient, twinkling stars, moon + sun, drifting clouds,
  * horizon haze, and three fog-graded parallax ridges.
@@ -34,7 +43,9 @@ export class Sky {
   private readonly stars: Star[] = [];
   private readonly clouds: Cloud[] = [];
   private readonly ridges: Ridge[];
+  private readonly structures: Structure[] = [];
   private readonly cloudSprite: HTMLCanvasElement;
+  private readonly puff = bakePuff(40);
 
   constructor() {
     const rand = mulberry32(4242);
@@ -72,6 +83,17 @@ export class Sky {
       ridge(0.22, "#6e3a28", "#552c1e", 42),
       ridge(0.4, "#54291c", "#3d1d14", 18),
     ];
+
+    // A distant mining-outpost skyline standing on the horizon.
+    for (let i = 0; i < 12; i++) {
+      this.structures.push({
+        u: rand(),
+        type: Math.floor(rand() * 4),
+        scale: 0.75 + rand() * 0.7,
+        lit: rand(),
+        blink: rand() * Math.PI * 2,
+      });
+    }
 
     // Soft cloud puff, baked once.
     this.cloudSprite = document.createElement("canvas");
@@ -164,25 +186,123 @@ export class Sky {
       ctx.fillRect(0, horizon - hazeH, vw, hazeH);
     }
 
-    // Parallax ridges, far to near, with vertical fog grading.
-    for (const ridge of this.ridges) {
-      const step = 26;
-      const offset = cam.x * ridge.parallax;
-      const crest = ridge.base + 80;
-      const fill = ctx.createLinearGradient(0, horizon - crest, 0, horizon);
-      fill.addColorStop(0, ridge.top);
-      fill.addColorStop(1, ridge.bottom);
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.moveTo(0, horizon);
-      for (let sx = 0; sx <= vw + step; sx += step) {
-        const i = Math.floor((sx + offset) / step);
-        const h = ridge.points[((i % ridge.points.length) + ridge.points.length) % ridge.points.length]!;
-        ctx.lineTo(sx, horizon - ridge.base - h);
+    // Parallax ridges far→near, with the outpost skyline tucked behind the
+    // nearest hill so it reads as distant.
+    this.drawRidge(ctx, this.ridges[0]!, cam, horizon, vw);
+    this.drawRidge(ctx, this.ridges[1]!, cam, horizon, vw);
+    this.drawStructures(ctx, cam, horizon, time, vw);
+    this.drawRidge(ctx, this.ridges[2]!, cam, horizon, vw);
+  }
+
+  private drawRidge(ctx: CanvasRenderingContext2D, ridge: Ridge, cam: Camera, horizon: number, vw: number): void {
+    const step = 26;
+    const offset = cam.x * ridge.parallax;
+    const crest = ridge.base + 80;
+    const fill = ctx.createLinearGradient(0, horizon - crest, 0, horizon);
+    fill.addColorStop(0, ridge.top);
+    fill.addColorStop(1, ridge.bottom);
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(0, horizon);
+    for (let sx = 0; sx <= vw + step; sx += step) {
+      const i = Math.floor((sx + offset) / step);
+      const h = ridge.points[((i % ridge.points.length) + ridge.points.length) % ridge.points.length]!;
+      ctx.lineTo(sx, horizon - ridge.base - h);
+    }
+    ctx.lineTo(vw, horizon);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** A distant industrial skyline: derricks, stacks, tanks, cranes. */
+  private drawStructures(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    horizon: number,
+    time: number,
+    vw: number,
+  ): void {
+    const parallax = 0.3;
+    const band = vw * 1.8;
+    const offset = cam.x * parallax;
+    for (const s of this.structures) {
+      const x = ((((s.u * band - offset) % band) + band) % band) - band * 0.1;
+      if (x < -70 || x > vw + 70) continue;
+      const H = 34 + s.scale * 34; // height above horizon
+      const w = 12 + s.scale * 10;
+      ctx.save();
+      ctx.translate(x, horizon);
+      ctx.fillStyle = "rgba(30,18,15,0.9)";
+      ctx.strokeStyle = "rgba(30,18,15,0.9)";
+      if (s.type === 0) {
+        // Derrick: a lattice tower tapering to a point.
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.5, 0);
+        ctx.lineTo(-w * 0.16, -H);
+        ctx.lineTo(w * 0.16, -H);
+        ctx.lineTo(w * 0.5, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineWidth = 1;
+        for (let b = 1; b <= 4; b++) {
+          const t = b / 5;
+          const y = -H * t;
+          const hw = w * (0.5 - 0.34 * t);
+          ctx.beginPath();
+          ctx.moveTo(-hw, y);
+          ctx.lineTo(hw, y);
+          ctx.stroke();
+        }
+        // top marker light
+        ctx.fillStyle = "#ffcf7a";
+        ctx.fillRect(-1, -H - 3, 2, 2);
+      } else if (s.type === 1) {
+        // Smokestack: tall taper with a blinking aviation light and smoke.
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.32, 0);
+        ctx.lineTo(-w * 0.2, -H);
+        ctx.lineTo(w * 0.2, -H);
+        ctx.lineTo(w * 0.32, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.22;
+        ctx.drawImage(this.puff, -16 + Math.sin(time * 0.5 + s.blink) * 4, -H - 30, 32, 32);
+        ctx.globalAlpha = 1;
+        const blink = 0.5 + 0.5 * Math.sin(time * 2 + s.blink);
+        ctx.fillStyle = `rgba(255,70,55,${(0.3 + blink * 0.7).toFixed(2)})`;
+        ctx.fillRect(-1.5, -H - 3, 3, 3);
+      } else if (s.type === 2) {
+        // Storage tank: a squat domed cylinder.
+        const th = H * 0.6;
+        const tw = w * 1.1;
+        ctx.beginPath();
+        ctx.rect(-tw / 2, -th, tw, th);
+        ctx.arc(0, -th, tw / 2, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,207,122,0.85)";
+        ctx.fillRect(-tw / 2 + 3, -th * 0.6, 2, 2);
+        ctx.fillRect(tw / 2 - 5, -th * 0.6, 2, 2);
+      } else {
+        // Gantry crane: mast, jib, and a hanging hook line.
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -H);
+        ctx.stroke();
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.3, -H + 4);
+        ctx.lineTo(w * 1.1, -H + 2);
+        ctx.stroke();
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(w * 0.9, -H + 3);
+        ctx.lineTo(w * 0.9, -H * 0.45);
+        ctx.stroke();
+        ctx.fillStyle = "#ffcf7a";
+        ctx.fillRect(-1, -H - 2, 2, 2);
       }
-      ctx.lineTo(vw, horizon);
-      ctx.closePath();
-      ctx.fill();
+      ctx.restore();
     }
   }
 }

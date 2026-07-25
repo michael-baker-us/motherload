@@ -8,8 +8,10 @@ import { STATIONS } from "../game/stations";
 import { biomeAt } from "../game/biomes";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
-import { bakeCrust, bakeEdge, bakeGlow } from "./bake";
+import { bakeCrust, bakeEdge, bakeGlow, bakePuff } from "./bake";
 import { CameraFX } from "./camerafx";
+import { FONT_DISPLAY, FONT_UI } from "./fonts";
+import type { IconId } from "./icons";
 import { Lighting } from "./lighting";
 import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
@@ -65,6 +67,7 @@ export class Renderer {
   private readonly lavaGlow = bakeGlow(96, 255, 120, 30);
   private readonly warmGlow = bakeGlow(48, 255, 210, 130);
   private readonly anomalyGlow = bakeGlow(128, 120, 235, 255);
+  private readonly puff = bakePuff(48);
   private readonly motes: { ox: number; oy: number; phase: number }[] = [];
 
   private particles: Particle[] = [];
@@ -327,6 +330,7 @@ export class Renderer {
         items: ITEM_ORDER.map((id, i) => ({
           key: `${i + 1}`,
           tag: ITEMS[id].tag,
+          icon: id as IconId, // item ids double as icon ids
           count: p.items[id],
         })),
       },
@@ -561,7 +565,7 @@ export class Renderer {
       const sx = f.x - cam.x;
       const sy = f.y - cam.y;
       ctx.globalAlpha = Math.min(1, t * 1.6); // fade only near the end
-      ctx.font = `bold ${f.size}px ui-monospace, monospace`;
+      ctx.font = `bold ${f.size}px ${FONT_UI}`;
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(0,0,0,0.7)";
       ctx.strokeText(f.text, sx, sy);
@@ -892,121 +896,224 @@ export class Renderer {
     const cam = game.camera;
     const groundY = game.world.surfaceRow * TILE;
     ctx.textBaseline = "top";
+
+    // --- Outpost infrastructure across the whole district (behind the buildings):
+    // a slung power cable, a ground pipeline on stanchions, and hissing steam vents.
+    const first = STATIONS[0]!;
+    const last = STATIONS[STATIONS.length - 1]!;
+    const dx0 = first.x0 * TILE - cam.x - 26;
+    const dx1 = (last.x1 + 1) * TILE - cam.x + 26;
+    const gy = groundY - cam.y;
+    const h = TILE * 3;
+    if (dx1 > -40 && dx0 < cam.viewWidth + 40) {
+      const poleTop = gy - h - 20;
+      ctx.strokeStyle = "#332e27";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(dx0 + 4, gy);
+      ctx.lineTo(dx0 + 4, poleTop);
+      ctx.moveTo(dx1 - 4, gy);
+      ctx.lineTo(dx1 - 4, poleTop);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(18,14,10,0.85)"; // drooping cable (catenary)
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(dx0 + 4, poleTop + 3);
+      ctx.quadraticCurveTo((dx0 + dx1) / 2, poleTop + 36, dx1 - 4, poleTop + 3);
+      ctx.stroke();
+      // Ground pipeline with stanchions.
+      ctx.fillStyle = "#463b33";
+      ctx.fillRect(dx0, gy - 8, dx1 - dx0, 4);
+      ctx.fillStyle = "#5a4d42";
+      ctx.fillRect(dx0, gy - 8, dx1 - dx0, 1.3);
+      ctx.fillStyle = "#332c26";
+      for (let x = dx0 + 10; x < dx1; x += 28) ctx.fillRect(x, gy - 6, 3, 6);
+      // Steam vents in the gaps between buildings (baked puff — no per-frame gradients).
+      for (const vx of [(first.x1 + 1.5) * TILE - cam.x, (last.x0 - 0.5) * TILE - cam.x]) {
+        ctx.fillStyle = "#3c342c";
+        ctx.fillRect(vx - 3, gy - 13, 6, 13);
+        ctx.fillStyle = "#4c4237";
+        ctx.fillRect(vx - 5, gy - 15, 10, 3);
+        for (let k = 0; k < 2; k++) {
+          const rise = (this.time * 0.5 + vx * 0.01 + k * 0.5) % 1;
+          const pyy = gy - 17 - rise * 34;
+          const r = 6 + rise * 9;
+          const drift = Math.sin(rise * 3 + vx) * 3;
+          ctx.globalAlpha = 0.2 * (1 - rise);
+          ctx.drawImage(this.puff, vx + drift - r, pyy - r, r * 2, r * 2);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
     for (const s of STATIONS) {
       const sx = s.x0 * TILE - cam.x;
       const w = (s.x1 - s.x0 + 1) * TILE;
-      const h = TILE * 3;
-      const sy = groundY - h - cam.y;
+      const bh = TILE * 3;
+      const sy = groundY - bh - cam.y; // top of the building
+      const baseY = groundY - cam.y; // ground line
       if (sx + w < -80 || sx > cam.viewWidth + 80) continue;
+      const blink = (Math.sin(this.time * 2.4 + s.x0) + 1) / 2;
 
-      // Foundation slab.
-      ctx.fillStyle = "#2b2723";
-      ctx.beginPath();
-      ctx.roundRect(sx - 6, groundY - cam.y - 4, w + 12, 5, 2);
-      ctx.fill();
+      // Concrete footing.
+      ctx.fillStyle = "#26221e";
+      ctx.fillRect(sx - 5, baseY - 4, w + 10, 6);
+      ctx.fillStyle = "#3a352f";
+      ctx.fillRect(sx - 5, baseY - 4, w + 10, 1.5);
 
-      // Body with vertical shading and an outline for pop.
-      const body = ctx.createLinearGradient(0, sy, 0, sy + h);
-      body.addColorStop(0, shade(s.color, 1.2));
-      body.addColorStop(0.7, s.color);
-      body.addColorStop(1, shade(s.color, 0.62));
+      // Corrugated-metal wall block.
+      const wallTop = sy + 8;
+      const wallH = baseY - wallTop;
+      const body = ctx.createLinearGradient(0, wallTop, 0, baseY);
+      body.addColorStop(0, shade(s.color, 1.08));
+      body.addColorStop(0.55, s.color);
+      body.addColorStop(1, shade(s.color, 0.56));
       ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.roundRect(sx, sy + 10, w, h - 10, [6, 6, 0, 0]);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.35)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      // Panel seams.
-      ctx.strokeStyle = "rgba(0,0,0,0.15)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sx + w / 3, sy + 12);
-      ctx.lineTo(sx + w / 3, sy + h - 2);
-      ctx.moveTo(sx + (2 * w) / 3, sy + 12);
-      ctx.lineTo(sx + (2 * w) / 3, sy + h - 2);
-      ctx.stroke();
+      ctx.fillRect(sx, wallTop, w, wallH);
+      for (let cxp = sx + 2; cxp < sx + w - 1; cxp += 4) {
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        ctx.fillRect(cxp, wallTop, 1, wallH);
+        ctx.fillStyle = "rgba(0,0,0,0.09)";
+        ctx.fillRect(cxp + 2, wallTop, 1, wallH);
+      }
+      ctx.fillStyle = "rgba(0,0,0,0.16)"; // horizontal panel seams
+      ctx.fillRect(sx, wallTop + wallH * 0.34, w, 1);
+      ctx.fillRect(sx, wallTop + wallH * 0.63, w, 1);
+      ctx.fillStyle = "rgba(28,17,9,0.12)"; // weather streaks
+      for (const wf of [0.24, 0.52, 0.8]) ctx.fillRect(sx + w * wf, wallTop + 3, 1.5, wallH * 0.45);
+      // Structural corner posts.
+      ctx.fillStyle = "#2a2621";
+      ctx.fillRect(sx - 1.5, wallTop - 2, 4, wallH + 2);
+      ctx.fillRect(sx + w - 2.5, wallTop - 2, 4, wallH + 2);
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(sx - 1.5, wallTop - 2, 1, wallH + 2);
+      ctx.fillRect(sx + w - 2.5, wallTop - 2, 1, wallH + 2);
 
-      // Roof with overhang, plus an antenna with a blinking beacon.
-      ctx.fillStyle = shade(s.color, 0.45);
-      ctx.beginPath();
-      ctx.moveTo(sx - 6, sy + 12);
-      ctx.lineTo(sx + 7, sy);
-      ctx.lineTo(sx + w - 7, sy);
-      ctx.lineTo(sx + w + 6, sy + 12);
-      ctx.closePath();
-      ctx.fill();
+      // Flat roof: overhanging eave + parapet band.
+      ctx.fillStyle = shade(s.color, 0.42);
+      ctx.fillRect(sx - 6, sy + 2, w + 12, 6);
+      ctx.fillStyle = shade(s.color, 0.62);
+      ctx.fillRect(sx - 6, sy + 2, w + 12, 1.5);
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.fillRect(sx - 6, sy + 7.5, w + 12, 1.5);
+
+      // Rooftop equipment breaks the boxy roofline: HVAC unit + steaming vent stack.
+      ctx.fillStyle = "#47433c";
+      ctx.fillRect(sx + 7, sy - 6, 13, 8);
+      ctx.fillStyle = "#5a554c";
+      ctx.fillRect(sx + 7, sy - 6, 13, 1.5);
+      ctx.fillStyle = "#2c2924";
+      for (let vv = sx + 9; vv < sx + 19; vv += 2) ctx.fillRect(vv, sy - 3.5, 1, 4);
+      const stackX = sx + w - 16;
+      ctx.fillStyle = "#3a352f";
+      ctx.fillRect(stackX, sy - 11, 5, 13);
+      ctx.fillStyle = "#4c463d";
+      ctx.fillRect(stackX - 1.5, sy - 12, 8, 2);
+      for (let k = 0; k < 2; k++) {
+        const rise = (this.time * 0.4 + s.x0 + k * 0.5) % 1;
+        const r = 4 + rise * 8;
+        const drift = Math.sin(rise * 3 + s.x0) * 3;
+        ctx.globalAlpha = 0.18 * (1 - rise);
+        ctx.drawImage(this.puff, stackX + 2.5 + drift - r, sy - 13 - rise * 26 - r, r * 2, r * 2);
+      }
+      ctx.globalAlpha = 1;
+      // Antenna with a blinking beacon.
       ctx.strokeStyle = "#55524e";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(sx + w - 14, sy);
-      ctx.lineTo(sx + w - 14, sy - 12);
+      ctx.moveTo(sx + w - 7, sy - 6);
+      ctx.lineTo(sx + w - 7, sy - 19);
       ctx.stroke();
-      const blink = (Math.sin(this.time * 2.4 + s.x0) + 1) / 2;
-      ctx.fillStyle = `rgba(255,80,60,${0.35 + blink * 0.65})`;
+      ctx.fillStyle = `rgba(255,80,60,${(0.35 + blink * 0.65).toFixed(2)})`;
       ctx.beginPath();
-      ctx.arc(sx + w - 14, sy - 13, 2, 0, Math.PI * 2);
+      ctx.arc(sx + w - 7, sy - 20, 2, 0, Math.PI * 2);
       ctx.fill();
-      // Antenna beacon glow (emissive — replayed after the darkness).
-      this.emitters.push({ sprite: this.warmGlow, x: sx + w - 14 - 10, y: sy - 13 - 10, w: 20, h: 20, alpha: blink * 0.5 });
+      this.emitters.push({ sprite: this.warmGlow, x: sx + w - 7 - 10, y: sy - 20 - 10, w: 20, h: 20, alpha: blink * 0.5 });
 
-      // Door with a lit transom, and a glowing window.
-      ctx.fillStyle = "rgba(0,0,0,0.5)";
-      ctx.beginPath();
-      ctx.roundRect(sx + w / 2 - 9, sy + h - 26, 18, 26, [3, 3, 0, 0]);
-      ctx.fill();
-      ctx.fillStyle = "#ffe9a0";
-      ctx.fillRect(sx + w / 2 - 7, sy + h - 24, 14, 3);
-      // Window glow (emissive — replayed after the darkness).
-      this.emitters.push({ sprite: this.warmGlow, x: sx + 16 - 20, y: sy + 27 - 20, w: 40, h: 40, alpha: 0.5 + 0.08 * Math.sin(this.time * 1.7 + sx) });
-      ctx.fillStyle = "#ffe9a0";
-      ctx.beginPath();
-      ctx.roundRect(sx + 10, sy + 22, 12, 10, 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      // --- Storefront (recessed lower level) with a canopy ---
+      const storeY = baseY - 28;
+      ctx.fillStyle = shade(s.color, 0.72); // canopy
+      ctx.fillRect(sx + 1, storeY - 5, w - 2, 5);
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.fillRect(sx + 1, storeY, w - 2, 1.5);
+      ctx.strokeStyle = "#2a2621";
       ctx.lineWidth = 1;
-      ctx.strokeRect(sx + 10, sy + 22, 12, 10);
-
-      // Illuminated sign board.
-      ctx.fillStyle = "rgba(8,7,6,0.85)";
       ctx.beginPath();
-      ctx.roundRect(sx + 3, sy + h - 48, w - 6, 16, 4);
-      ctx.fill();
-      ctx.font = "bold 9px monospace";
-      const glowColor = shade(s.color, 1.9);
+      ctx.moveTo(sx + 6, storeY - 5);
+      ctx.lineTo(sx + 6, storeY);
+      ctx.moveTo(sx + w - 6, storeY - 5);
+      ctx.lineTo(sx + w - 6, storeY);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,0.4)"; // recessed storefront wall
+      ctx.fillRect(sx + 3, storeY, w - 6, 28);
+      const winW = w - 30; // big lit display window
+      ctx.fillStyle = "#ffe6a2";
+      ctx.fillRect(sx + 6, storeY + 4, winW, 18);
+      ctx.strokeStyle = "rgba(70,45,22,0.55)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx + 6, storeY + 4, winW, 18);
+      ctx.beginPath();
+      ctx.moveTo(sx + 6 + winW / 2, storeY + 4);
+      ctx.lineTo(sx + 6 + winW / 2, storeY + 22);
+      ctx.moveTo(sx + 6, storeY + 13);
+      ctx.lineTo(sx + 6 + winW, storeY + 13);
+      ctx.stroke();
+      this.emitters.push({ sprite: this.warmGlow, x: sx + 6 + winW / 2 - 26, y: storeY + 13 - 22, w: 52, h: 44, alpha: 0.5 + 0.06 * Math.sin(this.time * 1.7 + sx) });
+      const doorX = sx + w - 21; // entrance
+      ctx.fillStyle = "#17140f";
+      ctx.fillRect(doorX, storeY + 2, 15, 26);
+      ctx.fillStyle = "#ffe9a0";
+      ctx.fillRect(doorX + 2, storeY + 3.5, 11, 2.5);
+      ctx.fillStyle = "#c9a24a";
+      ctx.fillRect(doorX + 11, storeY + 15, 1.6, 3.5);
+      ctx.fillStyle = "#33302a"; // threshold step
+      ctx.fillRect(doorX - 2, baseY - 3, 19, 3);
+
+      // --- Illuminated sign fascia ---
+      const signY = storeY - 16;
+      ctx.fillStyle = "rgba(8,7,6,0.92)";
+      ctx.fillRect(sx + 3, signY, w - 6, 12);
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.strokeRect(sx + 3, signY, w - 6, 12);
+      ctx.font = `bold 8px ${FONT_UI}`;
+      const glowColor = shade(s.color, 1.95);
       ctx.save();
       ctx.shadowColor = glowColor;
       ctx.shadowBlur = 7;
       ctx.fillStyle = glowColor;
+      ctx.textBaseline = "middle";
       const tw = ctx.measureText(s.label).width;
-      ctx.fillText(s.label, sx + (w - tw) / 2, sy + h - 44);
+      ctx.fillText(s.label, sx + (w - tw) / 2, signY + 6.5);
       ctx.restore();
+      ctx.textBaseline = "top";
 
-      // Per-shop props.
+      // --- Ground-level identity props ---
       if (s.id === "fuel") {
-        // Pump bollard with a hose looping to the wall.
-        ctx.fillStyle = "#8a2f22";
-        ctx.beginPath();
-        ctx.roundRect(sx - 16, groundY - cam.y - 18, 9, 15, 2);
-        ctx.fill();
+        ctx.fillStyle = "#8a2f22"; // pump bollard
+        ctx.fillRect(sx - 16, baseY - 18, 9, 15);
         ctx.fillStyle = "#ffe9a0";
-        ctx.fillRect(sx - 14, groundY - cam.y - 15, 5, 4);
+        ctx.fillRect(sx - 14, baseY - 15, 5, 4);
         ctx.strokeStyle = "#23211e";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(sx - 9, groundY - cam.y - 12);
-        ctx.quadraticCurveTo(sx - 2, groundY - cam.y - 26, sx + 3, sy + h - 14);
+        ctx.moveTo(sx - 9, baseY - 12);
+        ctx.quadraticCurveTo(sx - 2, baseY - 24, sx + 4, storeY + 10);
         ctx.stroke();
+        ctx.fillStyle = "#d9a11e"; // hazard stripes
+        ctx.fillRect(sx - 18, baseY - 3, 13, 3);
+        ctx.fillStyle = "#1a1712";
+        for (let hs = sx - 18; hs < sx - 6; hs += 4) ctx.fillRect(hs, baseY - 3, 2, 3);
       } else if (s.id === "trader") {
-        // Ore bin with a visible haul.
-        ctx.fillStyle = "#3d3a36";
+        ctx.fillStyle = "#3d3a36"; // ore skip
         ctx.beginPath();
-        ctx.moveTo(sx + w + 4, groundY - cam.y - 4);
-        ctx.lineTo(sx + w + 7, groundY - cam.y - 18);
-        ctx.lineTo(sx + w + 25, groundY - cam.y - 18);
-        ctx.lineTo(sx + w + 28, groundY - cam.y - 4);
+        ctx.moveTo(sx + w + 4, baseY - 4);
+        ctx.lineTo(sx + w + 7, baseY - 18);
+        ctx.lineTo(sx + w + 25, baseY - 18);
+        ctx.lineTo(sx + w + 28, baseY - 4);
         ctx.closePath();
         ctx.fill();
+        ctx.fillStyle = "#2a2824";
+        ctx.fillRect(sx + w + 6, baseY - 4, 22, 2);
         for (const [ox, oc] of [
           [10, "#f0c020"],
           [16, "#c9ccd4"],
@@ -1014,30 +1121,24 @@ export class Renderer {
         ] as const) {
           ctx.fillStyle = oc;
           ctx.beginPath();
-          ctx.arc(sx + w + ox, groundY - cam.y - 17, 2.6, 0, Math.PI * 2);
+          ctx.arc(sx + w + ox, baseY - 17, 2.6, 0, Math.PI * 2);
           ctx.fill();
         }
       } else {
-        // Upgrade shop: gear emblem on the wall.
-        const gx = sx + w - 15;
-        const gy = sy + 26;
-        ctx.fillStyle = shade(s.color, 0.45);
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * Math.PI * 2 + this.time * 0.4;
-          ctx.beginPath();
-          ctx.arc(gx + Math.cos(a) * 7, gy + Math.sin(a) * 7, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        ctx.fillStyle = "#7a3f1f"; // tool cart
+        ctx.fillRect(sx + w + 4, baseY - 12, 16, 9);
+        ctx.fillStyle = "#5a2f17";
+        ctx.fillRect(sx + w + 4, baseY - 12, 16, 2);
+        ctx.fillStyle = "#c9ccd4";
+        ctx.fillRect(sx + w + 6, baseY - 9, 5, 1.5);
+        ctx.fillStyle = "#23211e";
         ctx.beginPath();
-        ctx.arc(gx, gy, 6.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = shade(s.color, 1.5);
-        ctx.beginPath();
-        ctx.arc(gx, gy, 3, 0, Math.PI * 2);
+        ctx.arc(sx + w + 8, baseY - 3, 2, 0, Math.PI * 2);
+        ctx.arc(sx + w + 16, baseY - 3, 2, 0, Math.PI * 2);
         ctx.fill();
       }
     }
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 
   /** Armed dynamite: a stick on the tile plus a blast-radius ring, flashing faster as the fuse burns. */
@@ -1283,6 +1384,29 @@ export class Renderer {
     ctx.roundRect(sx + 3, sy + 2, w - 6, 4, 3);
     ctx.fill();
 
+    // Mechanical greebles: corner rivets, a louvred vent, and blinking status
+    // LEDs — small details that make the pod read as a built machine.
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    for (const [rx, ry] of [[3.5, 3.5], [w - 5, 3.5], [4, h - 10], [w - 5.5, h - 10]] as const) {
+      ctx.fillRect(sx + rx, sy + ry, 1.4, 1.4);
+    }
+    const ventX = p.facing === 1 ? sx + 3.5 : sx + w - 8.5;
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(ventX, sy + h * 0.42 + i * 2.2);
+      ctx.lineTo(ventX + 5, sy + h * 0.42 + i * 2.2);
+      ctx.stroke();
+    }
+    const ledX = sx + w / 2 - p.facing * 8.5;
+    const led1 = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.time * 3.1));
+    const led2 = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.time * 1.7 + 1.5));
+    ctx.fillStyle = `rgba(90,240,130,${led1.toFixed(2)})`;
+    ctx.fillRect(ledX, sy + h * 0.48, 1.5, 1.5);
+    ctx.fillStyle = `rgba(255,180,70,${led2.toFixed(2)})`;
+    ctx.fillRect(ledX, sy + h * 0.48 + 3, 1.5, 1.5);
+
     // Cockpit glass, offset toward facing.
     const cx = sx + w / 2 + p.facing * 4;
     const cy = sy + h * 0.38;
@@ -1503,7 +1627,7 @@ export class Renderer {
       `DEATHS ${game.deaths}`,
     ];
     const vw = ctx.canvas.clientWidth;
-    ctx.font = "11px ui-monospace, monospace";
+    ctx.font = `11px ${FONT_UI}`;
     ctx.textBaseline = "top";
     const w = 176;
     const x = vw - w - 12;
@@ -1517,7 +1641,7 @@ export class Renderer {
     ctx.stroke();
     ctx.fillStyle = "#bfe0ff";
     lines.forEach((l, i) => ctx.fillText(l, x + 10, y + 9 + i * 15));
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 
   private drawVignette(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
@@ -1585,7 +1709,7 @@ export class Renderer {
 
     // Logo: bevelled, gold-gradient, softly glowing MOTHERLOAD.
     const size = Math.min(74, vw / 8.2);
-    ctx.font = `900 ${size}px ui-monospace, monospace`;
+    ctx.font = `900 ${size}px ${FONT_DISPLAY}`;
     ctx.letterSpacing = `${(size * 0.05).toFixed(1)}px`;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     ctx.fillText("MOTHERLOAD", cx + 3, ly + 4); // drop shadow
@@ -1602,7 +1726,7 @@ export class Renderer {
     ctx.letterSpacing = "0px";
 
     // Mood subtitle + a thin rule + a demo tag.
-    ctx.font = `600 ${Math.min(15, vw / 62)}px ui-monospace, monospace`;
+    ctx.font = `600 ${Math.min(15, vw / 62)}px ${FONT_UI}`;
     ctx.fillStyle = "rgba(232,214,184,0.85)";
     ctx.fillText("A  S U B T E R R A N E A N   D E S C E N T", cx, ly + size * 0.7);
     ctx.strokeStyle = "rgba(255,200,110,0.3)";
@@ -1611,17 +1735,17 @@ export class Renderer {
     ctx.moveTo(cx - 150, ly + size * 0.95);
     ctx.lineTo(cx + 150, ly + size * 0.95);
     ctx.stroke();
-    ctx.font = "11px ui-monospace, monospace";
+    ctx.font = `11px ${FONT_UI}`;
     ctx.fillStyle = "rgba(140,200,255,0.7)";
     ctx.fillText("◈  PRE-ALPHA DEMO", cx, ly + size * 1.18);
 
     // Menu prompts.
     const py = vh * 0.63;
     const prompt = 0.72 + 0.28 * Math.sin(t * 3);
-    ctx.font = "bold 20px ui-monospace, monospace";
+    ctx.font = `bold 20px ${FONT_UI}`;
     ctx.fillStyle = `rgba(255,233,122,${prompt.toFixed(3)})`;
     ctx.fillText(game.hasSave ? "▸  CONTINUE" : "▸  START DIGGING", cx, py);
-    ctx.font = "13px ui-monospace, monospace";
+    ctx.font = `13px ${FONT_UI}`;
     ctx.fillStyle = "rgba(255,255,255,0.45)";
     ctx.fillText("press  [ Enter ]", cx, py + 26);
     if (game.hasSave) {
@@ -1631,12 +1755,12 @@ export class Renderer {
 
     // Controls, along the bottom.
     ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "12px ui-monospace, monospace";
+    ctx.font = `12px ${FONT_UI}`;
     ctx.fillText("← →  move    ↑  thrust    ↓  drill    E  station", cx, vh - 28);
 
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 
   private drawBriefingScreen(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
@@ -1644,13 +1768,13 @@ export class Renderer {
     ctx.fillRect(0, 0, vw, vh);
     ctx.textBaseline = "top";
     ctx.fillStyle = "rgba(142,200,255,0.85)";
-    ctx.font = "bold 12px monospace";
+    ctx.font = `bold 12px ${FONT_UI}`;
     center(ctx, "◈ INCOMING TRANSMISSION", vw, vh * 0.24);
     ctx.fillStyle = "#8ec8ff";
-    ctx.font = "bold 34px monospace";
+    ctx.font = `bold 34px ${FONT_DISPLAY}`;
     center(ctx, "THE SIGNAL", vw, vh * 0.24 + 22);
     ctx.fillStyle = "#d8e6ff";
-    ctx.font = "15px monospace";
+    ctx.font = `15px ${FONT_UI}`;
     const lines = [
       `Deep-scan has flagged an anomaly ${SLICE.goalDepth} metres down.`,
       "Mine minerals to fund your rig, upgrade the drill and tank,",
@@ -1660,9 +1784,9 @@ export class Renderer {
     lines.forEach((l, i) => center(ctx, l, vw, vh * 0.24 + 80 + i * 24));
     const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);
     ctx.fillStyle = `rgba(255,233,122,${pulse})`;
-    ctx.font = "17px monospace";
+    ctx.font = `17px ${FONT_UI}`;
     center(ctx, "[Enter] begin descent", vw, vh * 0.24 + 80 + lines.length * 24 + 24);
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 
   private drawDeathScreen(ctx: CanvasRenderingContext2D, game: Game, t: number): void {
@@ -1677,17 +1801,17 @@ export class Renderer {
     ctx.textBaseline = "top";
     ctx.globalAlpha = reveal;
     ctx.fillStyle = "#e04a3a";
-    ctx.font = "bold 30px monospace";
+    ctx.font = `bold 30px ${FONT_DISPLAY}`;
     center(ctx, "POD LOST", viewWidth, viewHeight * 0.4 - (1 - reveal) * 12);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "15px monospace";
+    ctx.font = `15px ${FONT_UI}`;
     center(ctx, game.deathCause, viewWidth, viewHeight * 0.4 + 46);
     center(ctx, `Salvage fee $${game.salvageFeeDue} · cargo and supplies lost`, viewWidth, viewHeight * 0.4 + 70);
     ctx.globalAlpha = promptIn;
     ctx.fillStyle = "#ffe97a";
     center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 106);
     ctx.globalAlpha = 1;
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 
   private drawWinScreen(ctx: CanvasRenderingContext2D, game: Game, t: number): void {
@@ -1706,16 +1830,16 @@ export class Renderer {
     ctx.textBaseline = "top";
     ctx.globalAlpha = reveal;
     ctx.fillStyle = "rgba(142,200,255,0.8)";
-    ctx.font = "bold 12px monospace";
+    ctx.font = `bold 12px ${FONT_UI}`;
     center(ctx, "◈ DEMO COMPLETE", vw, vh * 0.3 - (1 - reveal) * 10);
     ctx.fillStyle = "#8ec8ff";
-    ctx.font = "bold 32px monospace";
+    ctx.font = `bold 32px ${FONT_DISPLAY}`;
     center(ctx, "ANOMALY REACHED", vw, vh * 0.3 + 24 - (1 - reveal) * 10);
     ctx.fillStyle = "#d8e6ff";
-    ctx.font = "15px monospace";
+    ctx.font = `15px ${FONT_UI}`;
     center(ctx, "You've reached the signal at the bottom of the world.", vw, vh * 0.3 + 70);
 
-    ctx.font = "15px monospace";
+    ctx.font = `15px ${FONT_UI}`;
     ctx.fillStyle = "#ffffff";
     const stats = [
       `Depth reached    ${s.depth} m`,
@@ -1730,10 +1854,10 @@ export class Renderer {
 
     ctx.globalAlpha = clamp((t - (0.6 + stats.length * 0.18 + 0.25)) / 0.35, 0, 1);
     ctx.fillStyle = "#ffe97a";
-    ctx.font = "16px monospace";
+    ctx.font = `16px ${FONT_UI}`;
     center(ctx, "[Enter] keep exploring", vw, vh * 0.3 + 108 + stats.length * 26 + 24);
     ctx.globalAlpha = 1;
-    ctx.font = "14px monospace";
+    ctx.font = `14px ${FONT_UI}`;
   }
 }
 

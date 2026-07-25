@@ -37,6 +37,20 @@ export function bakeCrust(): HTMLCanvasElement {
   return canvas;
 }
 
+/** Soft smoke/steam puff, baked once and blitted (no per-frame gradients). */
+export function bakePuff(size = 48): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 1, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(228,228,232,0.6)");
+  grad.addColorStop(1, "rgba(228,228,232,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return canvas;
+}
+
 /** Radial glow sprite for emissive effects (drawn additively over the scene). */
 export function bakeGlow(size: number, r: number, g: number, b: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");

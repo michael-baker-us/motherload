@@ -6,6 +6,8 @@ import type { Station } from "../game/stations";
 import { TILE_DEFS } from "../game/tiles";
 import { currentTier, nextTier, UPGRADES, type UpgradeTrack } from "../game/upgrades";
 import type { Game } from "../game/game";
+import { FONT_UI } from "../render/fonts";
+import { iconImg, type IconId } from "../render/icons";
 
 const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
   drill: (v) => `speed ×${v}`,
@@ -18,30 +20,35 @@ const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
   coolant: (v) => `×${v} cooling`,
 };
 
-const TRACK_ICON: Record<UpgradeTrack, string> = {
-  drill: "⛏",
-  tank: "⛽",
-  cargo: "📦",
-  hull: "🔩",
-  engine: "🚀",
-  scanner: "📡",
-  shield: "🛡",
-  coolant: "❄",
+/**
+ * Icons are drawn procedurally (`render/icons.ts`) rather than typed as emoji:
+ * emoji use the platform colour font, so they looked different on every machine
+ * and clashed with the game's palette.
+ */
+const TRACK_ICON: Record<UpgradeTrack, IconId> = {
+  drill: "drill",
+  tank: "tank",
+  cargo: "cargo",
+  hull: "hull",
+  engine: "engine",
+  scanner: "scanner",
+  shield: "shield",
+  coolant: "coolant",
 };
 
-const MODULE_ICON: Record<ModuleId, string> = {
-  turbo: "⚡",
-  compactor: "🧲",
-  recycler: "♻️",
-  plating: "🛡",
-  probe: "📡",
+const MODULE_ICON: Record<ModuleId, IconId> = {
+  turbo: "turbo",
+  compactor: "compactor",
+  recycler: "recycler",
+  plating: "plating",
+  probe: "probe",
 };
 
-const ITEM_ICON: Record<ItemId, string> = {
-  dynamite: "🧨",
-  fuelCell: "🔋",
-  repairKit: "🧰",
-  teleporter: "🌀",
+const ITEM_ICON: Record<ItemId, IconId> = {
+  dynamite: "dynamite",
+  fuelCell: "fuelCell",
+  repairKit: "repairKit",
+  teleporter: "teleporter",
 };
 
 /**
@@ -66,7 +73,7 @@ export class ShopOverlay {
     const root = document.createElement("div");
     root.style.cssText =
       "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;" +
-      "background:rgba(0,0,0,0.55);font-family:monospace;z-index:10;";
+      `background:rgba(0,0,0,0.55);font-family:${FONT_UI};z-index:10;`;
 
     const panel = document.createElement("div");
     panel.style.cssText =
@@ -125,7 +132,7 @@ export class ShopOverlay {
     this.line(`Money  $${game.money.toLocaleString()}`);
     this.heading("Refuel");
     this.card({
-      icon: "⛽",
+      icon: "refuel",
       title: "REFUEL",
       sub:
         plan.units <= 0
@@ -164,7 +171,7 @@ export class ShopOverlay {
     }
     const total = cargoValue(p.cargo);
     this.card({
-      icon: "💰",
+      icon: "money",
       title: "SELL ALL",
       sub: "cash in the cargo bay",
       stat: total > 0 ? `+$${total.toLocaleString()}` : "nothing to sell",
@@ -230,7 +237,7 @@ export class ShopOverlay {
 
     const repair = refuelPlan(p.hull, p.maxHull, game.money, HULL.repairPricePerHp);
     this.card({
-      icon: "🩹",
+      icon: "repair",
       title: "REPAIR",
       sub: "restore hull",
       stat: `${Math.ceil(p.hull)} / ${p.maxHull} HP`,
@@ -290,7 +297,7 @@ export class ShopOverlay {
    * as a static badge instead of a button.
    */
   private card(opts: {
-    icon: string;
+    icon: IconId;
     title: string;
     sub: string;
     stat?: string;
@@ -306,8 +313,8 @@ export class ShopOverlay {
       `background:${opts.highlight ? "rgba(40,90,70,0.35)" : "rgba(255,255,255,0.04)"};`;
 
     const icon = document.createElement("div");
-    icon.textContent = opts.icon;
-    icon.style.cssText = "font-size:20px;width:26px;text-align:center;flex:none;";
+    icon.appendChild(iconImg(opts.icon, 22));
+    icon.style.cssText = "width:26px;flex:none;display:flex;justify-content:center;";
 
     const info = document.createElement("div");
     info.style.cssText = "flex:1;min-width:0;";
@@ -321,7 +328,7 @@ export class ShopOverlay {
     if (opts.stat) {
       const stat = document.createElement("div");
       stat.textContent = opts.stat;
-      stat.style.cssText = "font-size:11px;color:#8ec8ff;margin-top:2px;font-family:monospace;";
+      stat.style.cssText = `font-size:11px;color:#8ec8ff;margin-top:2px;font-family:${FONT_UI};`;
       info.appendChild(stat);
     }
 
@@ -332,7 +339,7 @@ export class ShopOverlay {
       btn.textContent = opts.actionLabel;
       btn.disabled = !opts.enabled;
       btn.style.cssText =
-        "flex:none;padding:8px 12px;font-family:monospace;font-size:12px;font-weight:bold;cursor:pointer;" +
+        `flex:none;padding:8px 12px;font-family:${FONT_UI};font-size:12px;font-weight:bold;cursor:pointer;` +
         "color:#fff;border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
         `background:linear-gradient(180deg,${opts.highlight ? "#3d7a5e,#2a5a44" : "#3a9d40,#2a6e2f"});` +
         "transition:filter 0.12s;" +
@@ -360,7 +367,7 @@ export class ShopOverlay {
     btn.setAttribute("aria-label", "Close");
     btn.style.cssText =
       "position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;" +
-      "font-family:monospace;font-size:15px;line-height:1;cursor:pointer;color:#fff;" +
+      `font-family:${FONT_UI};font-size:15px;line-height:1;cursor:pointer;color:#fff;` +
       "border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
       "background:rgba(255,255,255,0.08);";
     btn.addEventListener("click", () => this.close());

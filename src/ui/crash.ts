@@ -1,4 +1,5 @@
 import { SAVE_KEY } from "../game/save";
+import { FONT_UI } from "../render/fonts";
 
 let shown = false;
 
@@ -16,7 +17,7 @@ export function showCrashScreen(error: unknown): void {
   const overlay = document.createElement("div");
   overlay.style.cssText =
     "position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;" +
-    "background:rgba(6,4,8,0.93);font-family:ui-monospace,monospace;color:#e8e8e8;";
+    `background:rgba(6,4,8,0.93);font-family:${FONT_UI};color:#e8e8e8;`;
 
   const panel = document.createElement("div");
   panel.style.cssText =
@@ -56,7 +57,7 @@ function crashButton(label: string, background: string, onClick: () => void): HT
   const btn = document.createElement("button");
   btn.textContent = label;
   btn.style.cssText =
-    "padding:10px 16px;font-family:ui-monospace,monospace;font-size:13px;cursor:pointer;color:#fff;" +
+    `padding:10px 16px;font-family:${FONT_UI};font-size:13px;cursor:pointer;color:#fff;` +
     `border:1px solid rgba(255,255,255,0.18);border-radius:8px;background:${background};`;
   btn.addEventListener("click", onClick);
   return btn;

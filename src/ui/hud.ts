@@ -1,5 +1,7 @@
 import { HEAT } from "../game/config";
 import { clamp } from "../engine/math";
+import { FONT_UI } from "../render/fonts";
+import { iconCanvas, type IconId } from "../render/icons";
 import { alpha, palette } from "../render/palette";
 
 export interface HudData {
@@ -24,7 +26,7 @@ export interface HudData {
   /** Dev cheats active — progress is not being saved. */
   dev: boolean;
   /** Consumables in hotkey order: [key] TAG ×count pills, dimmed when empty. */
-  items: Array<{ key: string; tag: string; count: number }>;
+  items: Array<{ key: string; tag: string; icon: IconId; count: number }>;
 }
 
 const PANEL_W = 190;
@@ -32,7 +34,7 @@ const PANEL_H = 118;
 const BAR_X = 66;
 const BAR_W = PANEL_W - BAR_X - 14;
 
-const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
+const MONO = FONT_UI;
 
 /**
  * Stateful HUD: displayed values ease toward the real ones (money ticks up,
@@ -153,24 +155,29 @@ export class Hud {
     ctx.font = `12px ${MONO}`;
     ctx.fillText("← → fly/dig · ↑ thrust · ↓ drill · E station · 1-4 items · Esc menu", 16, viewH - 26);
 
-    // Item pills, bottom-right: [1] DYN ×2 — dimmed while the slot is empty.
+    // Item pills, bottom-right: [1] ⛏icon ×2 — dimmed while the slot is empty.
+    // The icon carries the identity, so the pill only spells out key and count.
     const viewW = ctx.canvas.clientWidth;
     ctx.font = `bold 11px ${MONO}`;
+    const ICON_PX = 15;
     let px = viewW - 14;
     for (let i = data.items.length - 1; i >= 0; i--) {
       const item = data.items[i]!;
-      const text = `${item.key} ${item.tag} ×${item.count}`;
-      const w = ctx.measureText(text).width + 16;
+      const text = `${item.key}  ×${item.count}`;
+      const w = ctx.measureText(text).width + ICON_PX + 20;
       px -= w;
       ctx.globalAlpha = item.count > 0 ? 1 : 0.35;
       ctx.fillStyle = "rgba(10,12,16,0.72)";
       ctx.beginPath();
-      ctx.roundRect(px, viewH - 34, w, 20, 10);
+      ctx.roundRect(px, viewH - 36, w, 23, 11);
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.14)";
       ctx.stroke();
       ctx.fillStyle = item.count > 0 ? palette.amber : "#9a9a9a";
-      ctx.fillText(text, px + 8, viewH - 29);
+      ctx.fillText(item.key, px + 9, viewH - 30);
+      const sprite = iconCanvas(item.icon, ICON_PX);
+      ctx.drawImage(sprite, px + 19, viewH - 33, ICON_PX, ICON_PX);
+      ctx.fillText(`×${item.count}`, px + 19 + ICON_PX + 4, viewH - 30);
       ctx.globalAlpha = 1;
       px -= 6;
     }

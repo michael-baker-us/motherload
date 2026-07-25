@@ -11,6 +11,8 @@ import {
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
 import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
+import { FONT_UI } from "../render/fonts";
+import { iconImg, type IconId } from "../render/icons";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFuel", "Unlimited fuel"],
@@ -55,7 +57,7 @@ export class MenuOverlay {
     const root = document.createElement("div");
     root.style.cssText =
       "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;" +
-      "background:rgba(0,0,0,0.55);font-family:monospace;z-index:10;";
+      `background:rgba(0,0,0,0.55);font-family:${FONT_UI};z-index:10;`;
 
     const panel = document.createElement("div");
     panel.style.cssText =
@@ -143,7 +145,7 @@ export class MenuOverlay {
       const s = audio.settings;
       this.section("Audio");
       this.card({
-        icon: s.muted ? "🔇" : "🔊", title: "Sound", sub: "master audio",
+        icon: "♪", iconId: s.muted ? "mute" : "sound", title: "Sound", sub: "master audio",
         actionLabel: s.muted ? "OFF" : "ON", on: !s.muted,
         onClick: () => { audio.toggleMuted(); this.render(game); },
       });
@@ -190,31 +192,31 @@ export class MenuOverlay {
 
       // One-shot grants — re-render so the money/dev badge update in place.
       this.card({
-        icon: "🔧", title: "Max upgrades", sub: "every track to top tier", actionLabel: "Max",
+        icon: "⚙", iconId: "repair", title: "Max upgrades", sub: "every track to top tier", actionLabel: "Max",
         onClick: () => { game.devMaxUpgrades(); this.render(game); },
       });
       this.card({
-        icon: "🧩", title: "Grant all modules", sub: "own every loadout module", actionLabel: "Give",
+        icon: "⚙", iconId: "modules", title: "Grant all modules", sub: "own every loadout module", actionLabel: "Give",
         onClick: () => { game.devGrantModules(); this.render(game); },
       });
       this.card({
-        icon: "🎒", title: "Grant all items", sub: "stock every consumable", actionLabel: "Give",
+        icon: "⚙", iconId: "pack", title: "Grant all items", sub: "stock every consumable", actionLabel: "Give",
         onClick: () => { game.devGrantItems(); this.render(game); },
       });
       this.card({
-        icon: "📦", title: "Fill cargo", sub: "assorted ore to sell", actionLabel: "Fill",
+        icon: "⚙", iconId: "cargo", title: "Fill cargo", sub: "assorted ore to sell", actionLabel: "Fill",
         onClick: () => { game.devFillCargo(); this.render(game); },
       });
       this.card({
-        icon: "💰", title: "Give $10,000", sub: "test purchases with real cash", actionLabel: "Give",
+        icon: "⚙", iconId: "money", title: "Give $10,000", sub: "test purchases with real cash", actionLabel: "Give",
         onClick: () => { game.devGiveMoney(); this.render(game); },
       });
       this.card({
-        icon: "⚡", title: "Refill fuel & hull", sub: "top off + clear heat", actionLabel: "Refill",
+        icon: "⚙", iconId: "fuelCell", title: "Refill fuel & hull", sub: "top off + clear heat", actionLabel: "Refill",
         onClick: () => { game.devRefill(); this.render(game); },
       });
       this.card({
-        icon: "💥", title: "Kill pod", sub: "trigger the death screen", actionLabel: "Kill", warn: true,
+        icon: "⚙", iconId: "boom", title: "Kill pod", sub: "trigger the death screen", actionLabel: "Kill", warn: true,
         onClick: () => { game.devKillPod(); this.close(); },
       });
 
@@ -263,7 +265,7 @@ export class MenuOverlay {
     h.textContent = `${open ? "▾" : "▸"}  ${title.toUpperCase()}`;
     h.style.cssText =
       "grid-column:1/-1;margin:10px 0 -1px;padding:0;text-align:left;cursor:pointer;" +
-      "background:none;border:none;font-family:monospace;font-size:9px;letter-spacing:2.5px;" +
+      `background:none;border:none;font-family:${FONT_UI};font-size:9px;letter-spacing:2.5px;` +
       "color:#6f7a91;font-weight:bold;";
     h.addEventListener("mouseenter", () => (h.style.color = "#9aa4b2"));
     h.addEventListener("mouseleave", () => (h.style.color = "#6f7a91"));
@@ -283,7 +285,10 @@ export class MenuOverlay {
    * `on` tints it as an active toggle; `warn` tints it as a caution (cheats).
    */
   private card(opts: {
+    /** Typographic glyph, used when `iconId` is absent. */
     icon: string;
+    /** Procedural icon (`render/icons.ts`) — preferred, matches the shop. */
+    iconId?: IconId;
     title: string;
     sub: string;
     actionLabel: string;
@@ -303,8 +308,13 @@ export class MenuOverlay {
       `border:1px solid ${accent.border};border-radius:10px;background:${accent.bg};`;
 
     const icon = document.createElement("div");
-    icon.textContent = opts.icon;
-    icon.style.cssText = "font-size:20px;width:24px;text-align:center;flex:none;";
+    if (opts.iconId) {
+      icon.appendChild(iconImg(opts.iconId, 20));
+      icon.style.cssText = "width:24px;flex:none;display:flex;justify-content:center;";
+    } else {
+      icon.textContent = opts.icon;
+      icon.style.cssText = "font-size:20px;width:24px;text-align:center;flex:none;";
+    }
 
     const info = document.createElement("div");
     info.style.cssText = "flex:1;min-width:0;";
@@ -319,7 +329,7 @@ export class MenuOverlay {
     const btn = document.createElement("button");
     btn.textContent = opts.actionLabel;
     btn.style.cssText =
-      "flex:none;min-width:58px;padding:7px 13px;font-family:monospace;font-size:12px;font-weight:bold;" +
+      `flex:none;min-width:58px;padding:7px 13px;font-family:${FONT_UI};font-size:12px;font-weight:bold;` +
       `cursor:pointer;color:#fff;border:none;border-radius:8px;background:${accent.btn};transition:filter 0.12s;`;
     btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.2)"));
     btn.addEventListener("mouseleave", () => (btn.style.filter = ""));
@@ -337,8 +347,8 @@ export class MenuOverlay {
       "border:1px solid rgba(255,255,255,0.1);border-radius:10px;background:rgba(255,255,255,0.035);";
 
     const icon = document.createElement("div");
-    icon.textContent = "🔉";
-    icon.style.cssText = "font-size:20px;width:24px;text-align:center;flex:none;";
+    icon.appendChild(iconImg("sound", 20));
+    icon.style.cssText = "width:24px;flex:none;display:flex;justify-content:center;";
 
     const info = document.createElement("div");
     info.style.cssText = "flex:1;min-width:0;";
@@ -347,14 +357,14 @@ export class MenuOverlay {
     title.style.cssText = "font-size:13px;font-weight:bold;color:#fff;";
     const sub = document.createElement("div");
     sub.textContent = value;
-    sub.style.cssText = "font-size:11px;color:#8ec8ff;font-family:monospace;margin-top:1px;";
+    sub.style.cssText = `font-size:11px;color:#8ec8ff;font-family:${FONT_UI};margin-top:1px;`;
     info.append(title, sub);
 
     const step = (label: string, onClick: () => void): HTMLButtonElement => {
       const b = document.createElement("button");
       b.textContent = label;
       b.style.cssText =
-        "flex:none;width:32px;height:30px;padding:0;font-family:monospace;font-size:16px;line-height:1;" +
+        `flex:none;width:32px;height:30px;padding:0;font-family:${FONT_UI};font-size:16px;line-height:1;` +
         "cursor:pointer;color:#fff;border:none;border-radius:8px;background:rgba(255,255,255,0.1);transition:filter 0.12s;";
       b.addEventListener("mouseenter", () => (b.style.filter = "brightness(1.3)"));
       b.addEventListener("mouseleave", () => (b.style.filter = ""));
@@ -371,7 +381,7 @@ export class MenuOverlay {
     const btn = document.createElement("button");
     btn.textContent = "▶  Resume";
     btn.style.cssText =
-      "grid-column:1/-1;width:100%;margin-top:4px;padding:11px 16px;font-family:monospace;" +
+      `grid-column:1/-1;width:100%;margin-top:4px;padding:11px 16px;font-family:${FONT_UI};` +
       "font-size:14px;font-weight:bold;cursor:pointer;color:#fff;border:none;border-radius:10px;" +
       "background:linear-gradient(180deg,#37954f,#2e7d46);transition:filter 0.12s;";
     btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.15)"));
@@ -387,7 +397,7 @@ export class MenuOverlay {
     btn.setAttribute("aria-label", "Close");
     btn.style.cssText =
       "position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;" +
-      "font-family:monospace;font-size:15px;line-height:1;cursor:pointer;color:#fff;" +
+      `font-family:${FONT_UI};font-size:15px;line-height:1;cursor:pointer;color:#fff;` +
       "border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
       "background:rgba(255,255,255,0.08);";
     btn.addEventListener("click", () => this.close());

@@ -1,3 +1,4 @@
+import "./assets/fonts.css";
 import { AudioEngine } from "./audio/engine";
 import { loadAudioSettings } from "./audio/settings";
 import { loadBindings } from "./engine/bindings";
@@ -81,5 +82,13 @@ document.addEventListener("visibilitychange", () => {
 // Last-resort boundary for anything thrown outside the loop (event handlers).
 window.addEventListener("error", (e) => showCrashScreen(e.error ?? e.message));
 window.addEventListener("unhandledrejection", (e) => showCrashScreen(e.reason));
+
+// Kick off web-font loading so canvas text picks them up within a frame or two.
+if (typeof document !== "undefined" && "fonts" in document) {
+  void Promise.allSettled([
+    document.fonts.load('16px "Share Tech Mono"'),
+    document.fonts.load('800 24px "Orbitron"'),
+  ]);
+}
 
 loop.start();

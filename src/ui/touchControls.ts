@@ -1,6 +1,8 @@
 import type { Input } from "../engine/input";
 import type { Game } from "../game/game";
 import { ITEM_ORDER, ITEMS } from "../game/items";
+import { FONT_UI } from "../render/fonts";
+import { iconDataUrl } from "../render/icons";
 
 export function isTouchCapable(): boolean {
   return (
@@ -24,7 +26,7 @@ const NO_SELECT =
 const BUTTON_BASE =
   "display:flex;align-items:center;justify-content:center;color:#e8e8e8;" +
   `background:${GLASS};border:1px solid ${BORDER};border-radius:14px;` +
-  "font-family:monospace;font-weight:bold;pointer-events:auto;transition:filter 0.08s;" +
+  `font-family:${FONT_UI};font-weight:bold;pointer-events:auto;transition:filter 0.08s;` +
   NO_SELECT;
 
 /**
@@ -137,7 +139,7 @@ export class TouchControls {
       "justify-content:flex-end;gap:12px;padding-bottom:16vh;pointer-events:auto;" + NO_SELECT;
     const label = document.createElement("div");
     label.style.cssText =
-      "color:#ffe97a;font-size:15px;font-weight:bold;letter-spacing:1px;font-family:monospace;" +
+      `color:#ffe97a;font-size:15px;font-weight:bold;letter-spacing:1px;font-family:${FONT_UI};` +
       `padding:14px 22px;border-radius:12px;background:${GLASS};border:1px solid ${BORDER};`;
     overlay.appendChild(label);
     // The tap-anywhere zone must not swallow taps on the new-game button below it.
@@ -151,7 +153,7 @@ export class TouchControls {
     const newGameBtn = document.createElement("button");
     newGameBtn.textContent = "NEW GAME (overwrites save)";
     newGameBtn.style.cssText =
-      "display:none;color:#d8c9b8;font-size:12px;font-family:monospace;" +
+      `display:none;color:#d8c9b8;font-size:12px;font-family:${FONT_UI};` +
       `padding:10px 18px;border-radius:10px;background:${GLASS};border:1px solid ${BORDER};` +
       "pointer-events:auto;" + NO_SELECT;
     newGameBtn.addEventListener("pointerdown", (e) => {
@@ -212,7 +214,8 @@ export class TouchControls {
       btn.style.cssText +=
         "width:52px;height:52px;border-radius:12px;flex-direction:column;gap:1px;";
       btn.innerHTML =
-        `<span style="font-size:11px;pointer-events:none">${ITEMS[id].tag}</span>` +
+        `<img src="${iconDataUrl(id, 22)}" alt="${ITEMS[id].name}" ` +
+        'style="width:22px;height:22px;pointer-events:none">' +
         '<span data-count style="font-size:10px;color:#ffe97a;pointer-events:none">×0</span>';
       el.appendChild(btn);
       return btn;
