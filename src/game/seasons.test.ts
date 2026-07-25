@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SEASON } from "./config";
-import { TILE_DEFS } from "./tiles";
+import { STRATA, TILE_DEFS } from "./tiles";
 import {
   DEFAULT_SEASON,
   SEASONS,
@@ -63,6 +63,22 @@ describe("season invariants", () => {
       expect(pocket.minDepth).toBeLessThan(pocket.maxDepth);
       expect(pocket.area).toBeGreaterThan(0);
       expect(pocket.area).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("keeps seasonal topsoil to a sane band and strength", () => {
+    for (const s of SEASONS) {
+      const soil = s.look.topsoil;
+      if (!soil) continue;
+      expect(soil.depth).toBeGreaterThan(0);
+      // Beyond the Dirt stratum the band would bleed into stone and read wrong.
+      expect(soil.depth).toBeLessThanOrEqual(STRATA[0]!.maxDepth);
+      expect(soil.strength).toBeGreaterThan(0);
+      expect(soil.strength).toBeLessThanOrEqual(1);
+      // shade()/mixHex parse the #rrggbb form only.
+      for (const c of [soil.color, soil.vein, soil.fleck]) {
+        expect(c).toMatch(/^#[0-9a-f]{6}$/i);
+      }
     }
   });
 

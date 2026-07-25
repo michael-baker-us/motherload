@@ -18,8 +18,11 @@ import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
-import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
+import { makeTileTextures, makeTopsoilTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
 import { Weather } from "./weather";
+
+/** Blend steps for the seasonal topsoil in the depth pass's face-colour LUT. */
+const SOIL_STEPS = 6;
 
 interface Particle {
   x: number;
@@ -46,6 +49,20 @@ interface Particle {
   angle?: number;
   /** Counted against SEASON.weather.budget so weather can't starve dig debris. */
   weather?: boolean;
+}
+
+/**
+ * Linear blend between two #rrggbb colours. Returns hex, not rgb(), because the
+ * result is fed straight into `shade()`, which parses the #rrggbb form.
+ */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const mix = (sh: number): string =>
+    Math.round(((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(16)}${mix(8)}${mix(0)}`;
 }
 
 /** A rising, fading reward number (e.g. "+$120") anchored to a world point. */
@@ -78,6 +95,10 @@ export class Renderer {
   private weatherTintColor = "#000000";
   /** Per-season sunlit crust (grass, leaf litter, snow), baked on first use. */
   private readonly crusts = new Map<string, HTMLCanvasElement>();
+  /** Per-season near-surface earth textures, baked on first use. */
+  private readonly topsoils = new Map<string, HTMLCanvasElement[]>();
+  /** Season the face-colour LUT was built for; a change invalidates it. */
+  private faceSeason = "";
   private readonly hud = new Hud();
   private readonly lighting = new Lighting();
   private readonly postfx = new PostFX();
@@ -215,6 +236,12 @@ export class Renderer {
     // Held for this frame the same way `darkness` is, so the sub-passes below
     // (ground crust, weather) all agree with the pass that resolved it.
     this.frameSeason = season;
+    // The face LUT bakes the seasonal earth into its colours, so it has to go
+    // when the season does (dev switcher, or the title screen's live preview).
+    if (this.faceSeason !== season.id) {
+      this.faceSeason = season.id;
+      this.faceColors.clear();
+    }
     const grade = season.look.grade;
     // The season sets a darkness floor at the surface — winter's short, dim days.
     this.darkness = darknessAt(centerDepth, grade.surfaceDark);
@@ -770,6 +797,32 @@ export class Renderer {
     return c;
   }
 
+  /** The season's topsoil variants, baked on first use; null if it has none. */
+  private topsoil(): HTMLCanvasElement[] | null {
+    const p = this.frameSeason.look.topsoil;
+    if (!p) return null;
+    let t = this.topsoils.get(this.frameSeason.id);
+    if (!t) {
+      t = makeTopsoilTextures(p);
+      this.topsoils.set(this.frameSeason.id, t);
+    }
+    return t;
+  }
+
+  /**
+   * How strongly the seasonal earth shows at `depth` tiles below the surface.
+   * Full strength through the top quarter of the band, then eased to nothing —
+   * so it reads as a *layer* with a soft underside rather than a wash that
+   * starts fading the moment you break ground.
+   */
+  private topsoilBlend(depth: number): number {
+    const p = this.frameSeason.look.topsoil;
+    if (!p || depth < 0 || depth >= p.depth) return 0;
+    const t = 1 - depth / p.depth; // 1 at the surface → 0 at the band's floor
+    const HOLD = 0.75;
+    return p.strength * (t >= HOLD ? 1 : (t / HOLD) ** 1.5);
+  }
+
   private drawTiles(ctx: CanvasRenderingContext2D, game: Game): void {
     const cam = game.camera;
     const world = game.world;
@@ -781,6 +834,7 @@ export class Renderer {
     if (viewPrefs.depth) this.drawDepthPass(ctx, game);
 
     const crust = this.crust(this.frameSeason.look.flora.ground);
+    const topsoil = this.topsoil();
 
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
@@ -800,10 +854,23 @@ export class Renderer {
         const texTile =
           tile === TileId.GasPocket ? stratumAt(ty - game.world.surfaceRow) : tile;
         const variants = this.textures.get(texTile);
+        const v = Math.floor(hash2d(tx, ty, 7) * TILE_VARIANTS) % TILE_VARIANTS;
         if (variants) {
-          const v = Math.floor(hash2d(tx, ty, 7) * TILE_VARIANTS) % TILE_VARIANTS;
           // Half-pixel bleed hides antialiasing seams at fractional zoom offsets.
           ctx.drawImage(variants[v]!, sx, sy, TILE + 0.5, TILE + 0.5);
+        }
+
+        // Seasonal topsoil: the near-surface earth itself is frozen / root-bound
+        // / sun-baked, fading back to the plain stratum with depth. Keyed off
+        // `texTile`, so a gas pocket disguised as topsoil gets the same
+        // treatment and stays invisible.
+        if (topsoil && texTile === TileId.Dirt) {
+          const a = this.topsoilBlend(ty - world.surfaceRow);
+          if (a > 0.01) {
+            ctx.globalAlpha = a;
+            ctx.drawImage(topsoil[v]!, sx, sy, TILE + 0.5, TILE + 0.5);
+            ctx.globalAlpha = 1;
+          }
         }
 
         if (tile === TileId.Empty) {
@@ -939,13 +1006,17 @@ export class Renderer {
           const left = world.getTile(tx - 1, ty);
           const right = world.getTile(tx + 1, ty);
           // A face is lit when the lamp is on the side its surface points toward.
-          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py);
-          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, this.faceLight(DEPTH.face.floor, podRow < ty, tx, ty, podCol, podRow), px, py);
-          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, this.faceLight(DEPTH.face.wall, podCol > tx, tx, ty, podCol, podRow), px, py);
-          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, this.faceLight(DEPTH.face.wall, podCol < tx, tx, ty, podCol, podRow), px, py);
+          // Cavity walls take the same seasonal earth as the tiles around them,
+          // or a dug shaft would show plain brown sides against frosted faces.
+          const soil = this.soilStep(ty - world.surfaceRow);
+          if (TILE_DEFS[up].solid) this.face(ctx, sx, sy, sx + TILE, sy, up, this.faceLight(DEPTH.face.ceiling, podRow > ty, tx, ty, podCol, podRow), px, py, up === TileId.Dirt ? soil : 0);
+          if (TILE_DEFS[down].solid) this.face(ctx, sx, sy + TILE, sx + TILE, sy + TILE, down, this.faceLight(DEPTH.face.floor, podRow < ty, tx, ty, podCol, podRow), px, py, down === TileId.Dirt ? soil : 0);
+          if (TILE_DEFS[left].solid) this.face(ctx, sx, sy, sx, sy + TILE, left, this.faceLight(DEPTH.face.wall, podCol > tx, tx, ty, podCol, podRow), px, py, left === TileId.Dirt ? soil : 0);
+          if (TILE_DEFS[right].solid) this.face(ctx, sx + TILE, sy, sx + TILE, sy + TILE, right, this.faceLight(DEPTH.face.wall, podCol < tx, tx, ty, podCol, podRow), px, py, right === TileId.Dirt ? soil : 0);
         } else if (TILE_DEFS[tile].solid && world.getTile(tx, ty - 1) === TileId.Sky) {
           // Sunlit lip along the surface — the terrain's visible top face.
-          this.face(ctx, sx, sy, sx + TILE, sy, tile, DEPTH.face.lip, px, py);
+          const lipSoil = tile === TileId.Dirt ? this.soilStep(ty - world.surfaceRow) : 0;
+          this.face(ctx, sx, sy, sx + TILE, sy, tile, DEPTH.face.lip, px, py, lipSoil);
         }
       }
     }
@@ -967,6 +1038,19 @@ export class Renderer {
     return base * (1 - 0.25 * t + 0.5 * dir * t);
   }
 
+  /** Quantise a topsoil blend into a LUT step, so cavity walls match the tiles. */
+  private soilStep(depth: number): number {
+    const a = this.topsoilBlend(depth);
+    return a <= 0.01 ? 0 : Math.max(1, Math.round(a * SOIL_STEPS));
+  }
+
+  /** The face colour for a tile `step`/SOIL_STEPS of the way to seasonal earth. */
+  private soilTone(tile: TileId, step: number): string {
+    const p = this.frameSeason.look.topsoil;
+    if (!p) return TILE_DEFS[tile].color;
+    return mixHex(TILE_DEFS[tile].color, p.color, step / SOIL_STEPS);
+  }
+
   /** One extruded face: front edge (ax,ay)→(bx,by) swept to the back plane. */
   private face(
     ctx: CanvasRenderingContext2D,
@@ -978,14 +1062,19 @@ export class Renderer {
     light: number,
     px: (x: number) => number,
     py: (y: number) => number,
+    /** Seasonal topsoil blend step, 0 = plain stratum. */
+    soil = 0,
   ): void {
     // Quantise the (now continuous) light factor so the colour LUT stays small:
-    // ~48 buckets per tile instead of a fresh shade() per face per frame.
+    // ~48 buckets per tile instead of a fresh shade() per face per frame. `soil`
+    // adds a few more steps for the seasonal topsoil blend; the LUT is cleared
+    // when the season changes, so the blend need not be part of the key's value.
     const bucket = Math.round(clamp(light, 0, 2) * 24);
-    const key = tile * 64 + bucket;
+    const key = (tile * 64 + bucket) * (SOIL_STEPS + 1) + soil;
     let color = this.faceColors.get(key);
     if (!color) {
-      color = shade(TILE_DEFS[tile].color, bucket / 24);
+      const base = soil > 0 ? this.soilTone(tile, soil) : TILE_DEFS[tile].color;
+      color = shade(base, bucket / 24);
       this.faceColors.set(key, color);
     }
     ctx.fillStyle = color;

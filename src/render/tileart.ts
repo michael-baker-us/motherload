@@ -1,4 +1,5 @@
 import { TILE } from "../game/config";
+import type { TopsoilPalette } from "../game/seasons";
 import { mulberry32 } from "../game/rng";
 import { TILE_DEFS, TileId } from "../game/tiles";
 
@@ -403,6 +404,49 @@ function paintIce(ctx: CanvasRenderingContext2D, rand: () => number, base: strin
   ctx.fillStyle = "rgba(40,70,95,0.22)";
   ctx.fillRect(0, TILE - 2, TILE, 2);
   ctx.fillRect(TILE - 2, 0, 2, TILE);
+}
+
+/**
+ * Seasonal topsoil variants, blitted over the plain stratum in the near-surface
+ * band and faded out with depth. Baked lazily per season (four small canvases)
+ * off their own RNG stream, so adding them can't shift the shared `mulberry32`
+ * sequence that makes the main texture set order-dependent.
+ */
+export function makeTopsoilTextures(p: TopsoilPalette): HTMLCanvasElement[] {
+  const rand = mulberry32(20260725);
+  const variants: HTMLCanvasElement[] = [];
+  for (let v = 0; v < TILE_VARIANTS; v++) {
+    const [canvas, ctx] = makeCanvas();
+    // Same grit treatment as ordinary dirt, so the band reads as the *same
+    // ground* in a different state rather than as a different material.
+    paintDirtBase(ctx, rand, shade(p.color, 0.92 + rand() * 0.16));
+    // Threads worked through the earth: roots, frost lenses, shrinkage cracks.
+    ctx.strokeStyle = p.vein;
+    for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.25 + rand() * 0.35;
+      ctx.lineWidth = 0.7 + rand() * 0.9;
+      let x = rand() * TILE;
+      let y = rand() * TILE;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let s = 0; s < 4; s++) {
+        x += (rand() - 0.5) * 16;
+        y += (rand() - 0.3) * 11;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    // Specks: ice crystals, seeds, leaf fragments.
+    for (let i = 0; i < 14; i++) {
+      ctx.globalAlpha = 0.2 + rand() * 0.45;
+      ctx.fillStyle = p.fleck;
+      const s = 0.8 + rand() * 1.3;
+      ctx.fillRect(rand() * TILE, rand() * TILE, s, s);
+    }
+    ctx.globalAlpha = 1;
+    variants.push(canvas);
+  }
+  return variants;
 }
 
 export function makeTileTextures(): TileTextures {

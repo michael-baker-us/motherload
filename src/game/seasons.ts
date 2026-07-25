@@ -110,6 +110,26 @@ export interface FloraPalette {
   ground: { rgb: string; depth: number; alpha: number };
 }
 
+/**
+ * The seasonal character of the near-surface earth itself — not a wash over it.
+ * Worked into the topsoil stratum as its own texture (frost veins, root mats,
+ * dried cracks) and blended back to the neutral rock over `depth` tiles, so the
+ * ground you dig through for the first stretch of a run belongs to its season
+ * and the transition is a gradient rather than a line.
+ */
+export interface TopsoilPalette {
+  /** Tiles over which the seasonal earth fades back to the plain stratum. */
+  depth: number;
+  /** Base earth tone for the band. */
+  color: string;
+  /** Threads worked through it — roots, frost, cracks, buried leaf litter. */
+  vein: string;
+  /** Small specks scattered through the band. */
+  fleck: string;
+  /** How completely the seasonal earth replaces the plain stratum, 0–1. */
+  strength: number;
+}
+
 export type WeatherKind = "petal" | "leaf" | "flake" | "mote" | "rain";
 
 export interface ParticleSpec {
@@ -173,6 +193,8 @@ export interface SeasonLook {
   iconId: string;
   sky: SkyPalette;
   flora: FloraPalette;
+  /** Seasonal near-surface earth, or null to leave the stratum untouched. */
+  topsoil: TopsoilPalette | null;
   weather: SeasonWeather;
   grade: GradeSpec;
 }
@@ -243,6 +265,13 @@ const SPRING: Season = {
       canopy: ["#7fb05f", "#98c46e", "#6a9a52"],
       accent: "#ffd7e8",
       ground: { rgb: "150,205,110", depth: 11, alpha: 0.72 },
+    },
+    topsoil: {
+      depth: 24,
+      color: "#7d4a2a", // rain-darkened earth
+      vein: "#6f9e52", // root threads reaching down from the new growth
+      fleck: "#a8d47a",
+      strength: 0.8,
     },
     weather: {
       ambient: {
@@ -332,6 +361,13 @@ const SUMMER: Season = {
       accent: null,
       ground: { rgb: "104,170,60", depth: 10, alpha: 0.8 },
     },
+    topsoil: {
+      depth: 16,
+      color: "#b0743d", // sun-bleached, dried out
+      vein: "#89511f", // shrinkage cracks
+      fleck: "#dcb87c",
+      strength: 0.75,
+    },
     weather: {
       ambient: {
         kind: "mote",
@@ -400,6 +436,13 @@ const AUTUMN: Season = {
       canopy: ["#d2762a", "#e0a03a", "#a8442a"],
       accent: "#f0c04a",
       ground: { rgb: "182,104,42", depth: 9, alpha: 0.7 },
+    },
+    topsoil: {
+      depth: 20,
+      color: "#77361a", // dark, rich, rain-fed — well clear of plain dirt
+      vein: "#d2762a", // leaf litter worked into the soil
+      fleck: "#edb14a",
+      strength: 0.8,
     },
     weather: {
       ambient: {
@@ -474,6 +517,15 @@ const WINTER: Season = {
       canopy: [],
       accent: "#e8f0f6",
       ground: { rgb: "238,247,255", depth: 14, alpha: 0.95 },
+    },
+    topsoil: {
+      // Frost drives deepest of the four — the frozen band is winter's real
+      // presence underground, not just a white line at the surface.
+      depth: 34,
+      color: "#7e808c", // earth frozen grey-blue
+      vein: "#cfe4f0", // ice lenses
+      fleck: "#ffffff",
+      strength: 0.88,
     },
     weather: {
       ambient: {
