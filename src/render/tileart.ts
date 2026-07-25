@@ -342,6 +342,69 @@ function paintLava(ctx: CanvasRenderingContext2D, rand: () => number): void {
   ctx.fillRect(px - 7, py - 7, 14, 14);
 }
 
+/**
+ * Meltwater: a dark pool with a bright surface line and a couple of highlights,
+ * so it reads as a recessed pocket you break into. The depth pass only backs
+ * `Empty`, so the recess is baked in here rather than projected.
+ */
+function paintWater(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
+  const deep = ctx.createLinearGradient(0, 0, 0, TILE);
+  deep.addColorStop(0, shade(base, 0.62));
+  deep.addColorStop(1, shade(base, 1.1));
+  ctx.fillStyle = deep;
+  ctx.fillRect(0, 0, TILE, TILE);
+  // Rippled caustic bands.
+  for (let i = 0; i < 5; i++) {
+    ctx.fillStyle = `rgba(190,235,255,${0.05 + rand() * 0.09})`;
+    const y = rand() * TILE;
+    ctx.fillRect(0, y, TILE, 0.8 + rand() * 1.4);
+  }
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = `rgba(220,245,255,${0.1 + rand() * 0.2})`;
+    ctx.fillRect(rand() * TILE, rand() * TILE, 1, 1);
+  }
+  // Bright meniscus along the top, shadow at the floor.
+  ctx.fillStyle = "rgba(215,245,255,0.4)";
+  ctx.fillRect(0, 0, TILE, 1.6);
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.fillRect(0, TILE - 2, TILE, 2);
+}
+
+/** Ice: pale, translucent, shot through with fracture planes and trapped air. */
+function paintIce(ctx: CanvasRenderingContext2D, rand: () => number, base: string): void {
+  const body = ctx.createLinearGradient(0, 0, TILE, TILE);
+  body.addColorStop(0, shade(base, 1.08));
+  body.addColorStop(1, shade(base, 0.78));
+  ctx.fillStyle = body;
+  ctx.fillRect(0, 0, TILE, TILE);
+  // Fracture planes — long, straight, and bright, unlike stone's cracks.
+  ctx.strokeStyle = "rgba(255,255,255,0.42)";
+  ctx.lineWidth = 0.9;
+  for (let i = 0; i < 3; i++) {
+    const x = rand() * TILE;
+    const y = rand() * TILE;
+    const a = rand() * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(x - Math.cos(a) * TILE, y - Math.sin(a) * TILE);
+    ctx.lineTo(x + Math.cos(a) * TILE, y + Math.sin(a) * TILE);
+    ctx.stroke();
+  }
+  // Trapped air bubbles.
+  for (let i = 0; i < 7; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.15 + rand() * 0.25})`;
+    const r = 0.8 + rand() * 1.6;
+    ctx.beginPath();
+    ctx.arc(rand() * TILE, rand() * TILE, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.fillRect(0, 0, TILE, 2);
+  ctx.fillRect(0, 0, 2, TILE);
+  ctx.fillStyle = "rgba(40,70,95,0.22)";
+  ctx.fillRect(0, TILE - 2, TILE, 2);
+  ctx.fillRect(TILE - 2, 0, 2, TILE);
+}
+
 export function makeTileTextures(): TileTextures {
   const rand = mulberry32(9001);
   const textures: TileTextures = new Map();
@@ -376,6 +439,10 @@ export function makeTileTextures(): TileTextures {
   ]) {
     paint(tile, (ctx, r) => paintMineral(ctx, r, dirtBase, TILE_DEFS[tile].color, tile));
   }
+  // Seasonal pockets. Appended last: the shared rand() stream makes variant art
+  // order-dependent, so adding painters here leaves every texture above byte-identical.
+  paint(TileId.Water, (ctx, r) => paintWater(ctx, r, TILE_DEFS[TileId.Water].color));
+  paint(TileId.Ice, (ctx, r) => paintIce(ctx, r, TILE_DEFS[TileId.Ice].color));
   // Gas pockets are the trap: pixel-identical to dirt.
   textures.set(TileId.GasPocket, textures.get(TileId.Dirt)!);
   return textures;

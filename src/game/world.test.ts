@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SLICE } from "./config";
 import { STATIONS } from "./stations";
 import { digClass, MINERAL_BANDS, richestOreAt, stratumAt, TileId } from "./tiles";
+import { SEASONS, seasonById } from "./seasons";
 import { World } from "./world";
 
 const SURFACE = 6;
@@ -294,5 +295,82 @@ describe("dynamite blast", () => {
     w.blast(col, SURFACE - 1, 2.5); // blast centred right above the shop floor
     expect(w.getTile(col, SURFACE)).toBe(TileId.Rock);
     expect(w.getTile(col, SURFACE + 1)).toBe(TileId.Rock);
+  });
+});
+
+describe("seasonal worldgen", () => {
+  const seasonal = (id: Parameters<typeof seasonById>[0], seed = 42) =>
+    new World(60, 2000, SURFACE, seed, 32, seasonById(id));
+  const count = (w: World, tile: TileId): number => {
+    let n = 0;
+    for (const t of w.tiles) if (t === tile) n++;
+    return n;
+  };
+
+  it("reproduces the pre-season output when no season is given", () => {
+    // The regression lock behind the save format: a legacy save has no season,
+    // so a null-season world must generate exactly what it always did.
+    expect(new World(60, 2000, SURFACE, 7, 32).tiles).toEqual(makeWorld(7).tiles);
+  });
+
+  it("generates different terrain per season from the same seed", () => {
+    expect(seasonal("winter").tiles).not.toEqual(seasonal("summer").tiles);
+    // …and is still deterministic within a season.
+    expect(seasonal("winter").tiles).toEqual(seasonal("winter").tiles);
+  });
+
+  it("places each season's pocket tile, and only its own", () => {
+    const winter = seasonal("winter");
+    const spring = seasonal("spring");
+    expect(count(winter, TileId.Ice)).toBeGreaterThan(0);
+    expect(count(winter, TileId.Water)).toBe(0);
+    expect(count(spring, TileId.Water)).toBeGreaterThan(0);
+    expect(count(spring, TileId.Ice)).toBe(0);
+  });
+
+  it("keeps pockets inside their depth band", () => {
+    const winter = seasonal("winter");
+    const band = seasonById("winter").world.pocket!;
+    for (let y = 0; y < winter.height; y++) {
+      for (let x = 0; x < winter.width; x++) {
+        if (winter.getTile(x, y) !== TileId.Ice) continue;
+        const depth = y - SURFACE;
+        expect(depth).toBeGreaterThanOrEqual(band.minDepth);
+        expect(depth).toBeLessThanOrEqual(band.maxDepth);
+      }
+    }
+  });
+
+  it("never lets a pocket overwrite an ore vein", () => {
+    // Pockets are rolled after ore, so adding them must leave the ore untouched.
+    // Compare winter against winter-minus-the-pocket, so the pocket is the only
+    // difference — any other season also varies lava, which is rolled before ore.
+    const winter = seasonById("winter");
+    const noPocket = { ...winter, world: { ...winter.world, pocket: null } };
+    const pocketed = new World(60, 2000, SURFACE, 42, 32, winter);
+    const plain = new World(60, 2000, SURFACE, 42, 32, noPocket);
+    for (const band of MINERAL_BANDS) {
+      expect(count(pocketed, band.tile)).toBe(count(plain, band.tile));
+    }
+  });
+
+  it("gives a hot season more lava and a rich season more ore", () => {
+    const spring = seasonal("spring");
+    expect(count(seasonal("summer"), TileId.Lava)).toBeGreaterThan(count(spring, TileId.Lava));
+    const oreOf = (w: World) => MINERAL_BANDS.reduce((n, b) => n + count(w, b.tile), 0);
+    expect(oreOf(seasonal("autumn"))).toBeGreaterThan(oreOf(spring));
+  });
+
+  it("never generates a fully impassable row in any season", () => {
+    const passable = (w: World, x: number, y: number): boolean =>
+      !w.isSolid(x, y) || w.isDiggable(x, y);
+    for (const season of SEASONS) {
+      const w = seasonal(season.id, 2024);
+      for (let y = SURFACE; y < w.height - 1; y++) {
+        let open = 0;
+        for (let x = 1; x < w.width - 1; x++) if (passable(w, x, y)) open++;
+        expect(open, `row ${y} (${season.id}) is fully blocked`).toBeGreaterThan(0);
+      }
+    }
   });
 });

@@ -23,17 +23,55 @@ export function bakeEdge(dx: number, dy: number): HTMLCanvasElement {
   return canvas;
 }
 
-/** Sunlit crust highlight for solid tiles exposed from above. */
-export function bakeCrust(): HTMLCanvasElement {
+/**
+ * Sunlit crust highlight for solid tiles exposed from above. `rgb` is the
+ * season's ground colour, so the same one-line blit that already runs on every
+ * exposed tile becomes spring grass, autumn leaf litter, or winter snow —
+ * seasonal ground cover with no tile-texture invalidation at all.
+ */
+export function bakeCrust(rgb = "255,225,185", depth = 7, alpha = 0.28): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = TILE;
   canvas.height = TILE;
   const ctx = canvas.getContext("2d")!;
-  const grad = ctx.createLinearGradient(0, 0, 0, 7);
-  grad.addColorStop(0, "rgba(255,225,185,0.28)");
-  grad.addColorStop(1, "rgba(255,225,185,0)");
+  const grad = ctx.createLinearGradient(0, 0, 0, depth);
+  grad.addColorStop(0, `rgba(${rgb},${alpha})`);
+  grad.addColorStop(1, `rgba(${rgb},0)`);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, TILE, 7);
+  ctx.fillRect(0, 0, TILE, depth);
+  return canvas;
+}
+
+/** Soft cloud puff, tinted per season. Three overlapping lobes. */
+export function bakeCloud(rgb: string): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 56;
+  const ctx = canvas.getContext("2d")!;
+  for (const [cx, cy, r] of [
+    [50, 34, 26],
+    [85, 26, 30],
+    [120, 34, 24],
+  ] as const) {
+    const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb},0.9)`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  return canvas;
+}
+
+/** Small soft-edged blob — one leaf or petal for the weather system. */
+export function bakeFleck(color: string, size = 8): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(size / 2, size / 2, size / 2, size / 3.4, 0, 0, Math.PI * 2);
+  ctx.fill();
   return canvas;
 }
 

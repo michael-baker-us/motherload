@@ -42,3 +42,19 @@ describe("flicker", () => {
     expect(Math.abs(a - b)).toBeGreaterThan(0.1);
   });
 });
+
+describe("seasonal darkness floor", () => {
+  it("keeps a dim season from ever fully brightening at the surface", () => {
+    expect(darknessAt(0)).toBe(0);
+    expect(darknessAt(0, 0.12)).toBe(0.12);
+  });
+
+  it("never lets the floor override a deeper, darker value", () => {
+    const deep = darknessAt(1000);
+    expect(darknessAt(1000, 0.12)).toBe(deep);
+  });
+
+  it("still caps at maxDarkness, so no season can black the screen out", () => {
+    expect(darknessAt(0, 1)).toBe(LIGHT.maxDarkness);
+  });
+});

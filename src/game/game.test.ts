@@ -7,6 +7,7 @@ import { spawnPoint } from "./player";
 import { TileId } from "./tiles";
 import { UPGRADES, type UpgradeTrack } from "./upgrades";
 import { BIOMES } from "./biomes";
+import { DEFAULT_SEASON, SEASONS } from "./seasons";
 
 const DT = 1 / 60;
 
@@ -601,5 +602,69 @@ describe("dev tools", () => {
     game.devWarpToDepth(BIOMES[2]!.minDepth + 15); // Magma Depths
     for (let i = 0; i < 120 && game.state === "playing"; i++) game.update(DT, idleInput);
     expect(game.player.heat).toBe(0);
+  });
+});
+
+describe("seasons", () => {
+  it("defaults to the default season and starts a new run in the picked one", () => {
+    const game = new Game(800, 600, null);
+    expect(game.season.id).toBe(DEFAULT_SEASON);
+    game.startNewGame("winter");
+    expect(game.season.id).toBe("winter");
+    // The world must have been rebuilt under that season, not just relabelled.
+    expect(game.world.season?.id).toBe("winter");
+  });
+
+  it("cycles the title picker with the arrow keys", () => {
+    const game = new Game(800, 600, null);
+    expect(game.state).toBe("title");
+    game.update(DT, keysPressed("ArrowRight"));
+    expect(game.titleSeason).toBe(1);
+    game.update(DT, keysPressed("ArrowLeft"));
+    game.update(DT, keysPressed("ArrowLeft"));
+    // Wraps around the back of the table rather than clamping.
+    expect(game.titleSeason).toBe(SEASONS.length - 1);
+  });
+
+  it("carries the season through save and continue", () => {
+    const storage = fakeStorage();
+    const first = new Game(800, 600, storage);
+    first.startNewGame("autumn");
+    first.state = "playing";
+    first.saveNow();
+    const tiles = Uint8Array.from(first.world.tiles);
+
+    const second = new Game(800, 600, storage);
+    expect(second.continueGame()).toBe(true);
+    expect(second.season.id).toBe("autumn");
+    // Same seed *and* same season ⇒ the terrain comes back identical.
+    expect(second.world.tiles).toEqual(tiles);
+  });
+
+  it("burns more fuel in winter than in summer over the same flight", () => {
+    const burn = (season: Parameters<Game["startNewGame"]>[0]): number => {
+      const game = makeGame();
+      game.startNewGame(season);
+      game.state = "playing";
+      const before = game.player.fuel;
+      for (let i = 0; i < 60; i++) game.update(DT, keysDown("ArrowUp"));
+      return before - game.player.fuel;
+    };
+    expect(burn("winter")).toBeGreaterThan(burn("summer"));
+  });
+
+  it("taints the run when the dev season switcher is used", () => {
+    const storage = fakeStorage();
+    const game = new Game(800, 600, storage);
+    game.startNewGame("spring");
+    game.devSetSeason("winter");
+    expect(game.season.id).toBe("winter");
+    expect(game.devMode).toBe(true);
+    // A season swapped for a look must never overwrite a real save…
+    const before = storage.getItem("motherload-save");
+    game.saveNow();
+    expect(storage.getItem("motherload-save")).toBe(before);
+    // …and it deliberately leaves the terrain as generated.
+    expect(game.world.season?.id).toBe("spring");
   });
 });

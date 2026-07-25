@@ -1,23 +1,25 @@
 import { clamp, lerp } from "../engine/math";
-import { CAMERA, DEPTH, FX, LIGHT, PHYSICS, POD_ANIM, POST, SLICE, TILE } from "../game/config";
+import { CAMERA, DEPTH, FX, LIGHT, PHYSICS, POD_ANIM, POST, SEASON, SLICE, TILE } from "../game/config";
 import { cargoUnits } from "../game/economy";
 import type { FxEvent, Game } from "../game/game";
 import { DYNAMITE, ITEM_ORDER, ITEMS } from "../game/items";
 import { hash2d, mulberry32 } from "../game/rng";
 import { STATIONS } from "../game/stations";
 import { biomeAt } from "../game/biomes";
+import { SEASONS, seasonFog, type FloraPalette, type Season } from "../game/seasons";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
 import { bakeCrust, bakeEdge, bakeGlow, bakePuff } from "./bake";
 import { CameraFX } from "./camerafx";
 import { FONT_DISPLAY, FONT_UI } from "./fonts";
-import type { IconId } from "./icons";
+import { iconCanvas, type IconId } from "./icons";
 import { Lighting } from "./lighting";
 import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
 import { makeTileTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
+import { Weather } from "./weather";
 
 interface Particle {
   x: number;
@@ -31,6 +33,19 @@ interface Particle {
   gravity: number;
   /** Rendered with "lighter" compositing — for anything that emits light. */
   additive: boolean;
+  // --- Ambient weather only. All optional, so the hot dig/spark paths that
+  // spawn hundreds of particles a second never touch them.
+  /** Peak horizontal sway in px/s — leaves swing, snow wanders. */
+  drift?: number;
+  driftHz?: number;
+  driftPhase?: number;
+  /** Baked sprite drawn instead of a square (leaves, petals). */
+  sprite?: HTMLCanvasElement;
+  /** Spin rate rad/s and the angle it has accumulated. */
+  spin?: number;
+  angle?: number;
+  /** Counted against SEASON.weather.budget so weather can't starve dig debris. */
+  weather?: boolean;
 }
 
 /** A rising, fading reward number (e.g. "+$120") anchored to a world point. */
@@ -55,6 +70,14 @@ export class Renderer {
   /** Flat-shaded face colors, keyed by tile id + light factor. */
   private readonly faceColors = new Map<number, string>();
   private readonly sky = new Sky();
+  /** The season resolved for the frame being drawn (previewed on the title). */
+  private frameSeason: Season = SEASONS[0]!;
+  private readonly weather = new Weather();
+  /** Colour + strength of the active weather spell's full-screen wash. */
+  private weatherTint = 0;
+  private weatherTintColor = "#000000";
+  /** Per-season sunlit crust (grass, leaf litter, snow), baked on first use. */
+  private readonly crusts = new Map<string, HTMLCanvasElement>();
   private readonly hud = new Hud();
   private readonly lighting = new Lighting();
   private readonly postfx = new PostFX();
@@ -63,7 +86,6 @@ export class Renderer {
   private readonly shadeBottom = bakeEdge(0, 1);
   private readonly shadeLeft = bakeEdge(-1, 0);
   private readonly shadeRight = bakeEdge(1, 0);
-  private readonly crust = bakeCrust();
   private readonly lavaGlow = bakeGlow(96, 255, 120, 30);
   private readonly warmGlow = bakeGlow(48, 255, 210, 130);
   private readonly anomalyGlow = bakeGlow(128, 120, 235, 255);
@@ -185,8 +207,24 @@ export class Renderer {
     // Depth darkness, computed before the world pass so the pod headlamp glow
     // and dust motes use this frame's value rather than last frame's.
     const centerDepth = (cam.y + cam.viewHeight / 2) / TILE - game.world.surfaceRow;
-    this.darkness = darknessAt(centerDepth);
+    // On the title screen the whole backdrop previews the season in the picker,
+    // so choosing one is a live before/after rather than a label. A continued
+    // run still loads its own season — the picker is labelled "new game" for
+    // exactly that reason.
+    const season = game.state === "title" ? SEASONS[game.titleSeason]! : game.season;
+    // Held for this frame the same way `darkness` is, so the sub-passes below
+    // (ground crust, weather) all agree with the pass that resolved it.
+    this.frameSeason = season;
+    const grade = season.look.grade;
+    // The season sets a darkness floor at the surface — winter's short, dim days.
+    this.darkness = darknessAt(centerDepth, grade.surfaceDark);
     const biome = biomeAt(centerDepth);
+    // One fog colour, pulled toward the season's, feeding both the lighting
+    // overlay and the depth haze — the two consumers that already take an [r,g,b].
+    const fog = seasonFog(biome.fog, season);
+    // How much of the frame is "surface" — the grade and weather live there and
+    // must not fight the biome fog down deep.
+    const surfaceMix = clamp(1 - this.darkness * SEASON.grade.depthFade, 0, 1);
 
     // Aim the directable headlamp for this frame (used by the pod turret and the
     // beam light alike).
@@ -201,7 +239,7 @@ export class Renderer {
     ctx.save();
     ctx.scale(zoom, zoom);
     ctx.translate(shakeX, shakeY);
-    this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time);
+    this.sky.draw(ctx, cam, game.world.surfaceRow * TILE, this.time, season.look);
     this.drawTiles(ctx, game);
     this.drawStations(ctx, game);
     this.drawFuse(ctx, game, cam.x, cam.y);
@@ -240,7 +278,7 @@ export class Renderer {
         x: podLX,
         y: lampY,
         radius: LIGHT.beam.ambientRadius * zoom,
-        color: LIGHT.headlampTint,
+        color: grade.lampTint,
         intensity: 1,
         wash: 0.12,
         beamAngle: this.beamAngle,
@@ -251,7 +289,7 @@ export class Renderer {
         x: podLX,
         y: podLY,
         radius: LIGHT.radius * zoom,
-        color: LIGHT.headlampTint,
+        color: grade.lampTint,
         intensity: 1,
         wash: 0.1,
       });
@@ -264,10 +302,10 @@ export class Renderer {
         this.lights.push({ x: ax, y: ay, radius: ar, color: LIGHT.beaconTint, intensity: 0.9, wash: 0.16 });
       }
     }
-    this.lighting.apply(ctx, this.lights, biome.fog, this.darkness, screenW, screenH);
+    this.lighting.apply(ctx, this.lights, fog, this.darkness, screenW, screenH);
 
     // Aerial-perspective haze thickening with depth (fades out at the surface).
-    this.postfx.depthHaze(ctx, biome.fog, FX.depthHaze * this.darkness, screenW, screenH);
+    this.postfx.depthHaze(ctx, fog, FX.depthHaze * this.darkness, screenW, screenH);
 
     // --- Emissive pass (zoomed + shaken, additive): glows over the darkness ---
     ctx.save();
@@ -287,9 +325,23 @@ export class Renderer {
     // --- Bloom: bright emissive sources bleed a soft halo ---
     this.postfx.bloom(ctx, this.emitters, screenW, screenH, zoom, shakeX, shakeY);
 
-    // Heat shimmer rising through the magma biome (a no-op elsewhere).
-    if (biome.name === "Magma Depths" && !viewPrefs.reducedMotion) {
-      this.postfx.heatHaze(ctx, FX.heatHaze.strength, FX.heatHaze.hz, this.time, screenW, screenH);
+    // Heat shimmer: the magma biome always, plus whatever the season adds at
+    // the surface (summer's air shimmers over hot ground).
+    const shimmer =
+      (biome.name === "Magma Depths" ? FX.heatHaze.strength : 0) + grade.heatHaze * surfaceMix;
+    if (shimmer > 0 && !viewPrefs.reducedMotion) {
+      this.postfx.heatHaze(ctx, shimmer, FX.heatHaze.hz, this.time, screenW, screenH);
+    }
+
+    // Season colour grade: a film-stock pass over the composited world. Kept
+    // separate from the biome wash above on purpose — that one is albedo-space
+    // mood applied pre-lighting, this one grades the finished frame. It fades
+    // out with depth so the deep reads as the biome's, not the season's, and
+    // sits before the vignette so it never touches the HUD or the title text.
+    this.postfx.grade(ctx, grade, surfaceMix, screenW, screenH);
+    // A weather spell (spring's rain squalls) cools the frame while it runs.
+    if (this.weatherTint > 0) {
+      this.postfx.wash(ctx, this.weatherTintColor, this.weatherTint, screenW, screenH);
     }
 
     this.drawVignette(ctx, screenW, screenH);
@@ -302,7 +354,7 @@ export class Renderer {
       return;
     }
     if (game.state === "briefing") {
-      this.drawBriefingScreen(ctx, screenW, screenH);
+      this.drawBriefingScreen(ctx, game, screenW, screenH);
       if (this.fade > 0) {
         ctx.fillStyle = `rgba(6,4,10,${this.fade.toFixed(3)})`;
         ctx.fillRect(0, 0, screenW, screenH);
@@ -327,6 +379,11 @@ export class Renderer {
         objective: game.objective(),
         toast: game.toast,
         dev: game.devMode,
+        season: {
+          label: season.name,
+          color: season.look.accent,
+          icon: season.look.iconId as IconId,
+        },
         items: ITEM_ORDER.map((id, i) => ({
           key: `${i + 1}`,
           tag: ITEMS[id].tag,
@@ -476,6 +533,25 @@ export class Renderer {
         additive: true,
       });
     }
+
+    // Seasonal surface weather. Counts its own live particles so it can never
+    // crowd dig debris out of the shared pool.
+    let live = 0;
+    for (const q of this.particles) if (q.weather) live++;
+    this.weather.emit(
+      game.season,
+      game.camera,
+      game.depth,
+      this.frameDt,
+      viewPrefs.reducedMotion,
+      live,
+      (wp) => this.spawn(wp as Particle),
+    );
+    const spell = game.season.look.weather.spell;
+    const targetTint = spell ? this.weather.spellStrength * spell.tintAlpha : 0;
+    // Ease the squall wash in and out rather than snapping it.
+    this.weatherTint += (targetTint - this.weatherTint) * Math.min(1, this.frameDt * 1.2);
+    if (spell) this.weatherTintColor = spell.tint;
   }
 
   private burst(
@@ -517,6 +593,12 @@ export class Renderer {
       p.vy += p.gravity * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      // Weather wanders sideways on a sine rather than falling dead straight.
+      if (p.drift) {
+        const age = p.maxLife - p.life;
+        p.x += p.drift * Math.sin(p.driftPhase! + age * p.driftHz! * Math.PI * 2) * dt;
+      }
+      if (p.spin) p.angle = (p.angle ?? 0) + p.spin * dt;
     }
     this.particles = this.particles.filter((p) => p.life > 0);
   }
@@ -532,8 +614,20 @@ export class Renderer {
     for (const p of this.particles) {
       if (p.additive !== additive) continue;
       ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - cam.x - p.size / 2, p.y - cam.y - p.size / 2, p.size, p.size);
+      const sx = p.x - cam.x;
+      const sy = p.y - cam.y;
+      if (p.sprite) {
+        // Sprite kinds (leaves, petals) tumble as they fall.
+        const s = p.size * 2;
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(p.angle ?? 0);
+        ctx.drawImage(p.sprite, -s / 2, -s / 2, s, s);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(sx - p.size / 2, sy - p.size / 2, p.size, p.size);
+      }
     }
     ctx.globalAlpha = 1;
     if (additive) ctx.globalCompositeOperation = "source-over";
@@ -665,6 +759,17 @@ export class Renderer {
 
   // --- World ---------------------------------------------------------------
 
+  /** The season's ground-cover sprite, baked on first use and cached. */
+  private crust(ground: FloraPalette["ground"]): HTMLCanvasElement {
+    const key = `${ground.rgb}|${ground.depth}|${ground.alpha}`;
+    let c = this.crusts.get(key);
+    if (!c) {
+      c = bakeCrust(ground.rgb, ground.depth, ground.alpha);
+      this.crusts.set(key, c);
+    }
+    return c;
+  }
+
   private drawTiles(ctx: CanvasRenderingContext2D, game: Game): void {
     const cam = game.camera;
     const world = game.world;
@@ -674,6 +779,8 @@ export class Renderer {
     const y1 = Math.min(world.height - 1, Math.floor((cam.y + cam.viewHeight) / TILE));
 
     if (viewPrefs.depth) this.drawDepthPass(ctx, game);
+
+    const crust = this.crust(this.frameSeason.look.flora.ground);
 
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
@@ -708,8 +815,10 @@ export class Renderer {
           continue;
         }
 
-        // Sunlit crust on any solid tile exposed from above.
-        if (!world.isSolid(tx, ty - 1)) ctx.drawImage(this.crust, sx, sy);
+        // Sunlit crust on any solid tile exposed from above — the season's
+        // ground cover rides on this existing blit, so no tile texture has to
+        // be re-baked or invalidated when the season changes.
+        if (!world.isSolid(tx, ty - 1)) ctx.drawImage(crust, sx, sy);
 
         if (tile === TileId.Lava) {
           // Emissive: replayed after the darkness so it glows through the dark.
@@ -1753,6 +1862,28 @@ export class Renderer {
       ctx.fillText("[ N ]  new game  ·  overwrites save", cx, py + 50);
     }
 
+    // Season picker. Only ever affects a *new* run — a continued save carries
+    // the season its world was generated under — so it's labelled as such.
+    const pick = SEASONS[game.titleSeason]!;
+    const sy = py + (game.hasSave ? 88 : 62);
+    ctx.font = `bold 9px ${FONT_UI}`;
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.letterSpacing = "3px";
+    ctx.fillText("NEW GAME SEASON", cx, sy);
+    ctx.letterSpacing = "0px";
+    const sicon = iconCanvas(pick.look.iconId as IconId, 18);
+    ctx.font = `bold 17px ${FONT_UI}`;
+    const nameW = ctx.measureText(pick.name.toUpperCase()).width;
+    ctx.drawImage(sicon, cx - nameW / 2 - 26, sy + 20, 18, 18);
+    ctx.fillStyle = pick.look.accent;
+    ctx.fillText(pick.name.toUpperCase(), cx, sy + 22);
+    ctx.font = `12px ${FONT_UI}`;
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText(`◂  ${pick.tagline}  ▸`, cx, sy + 46);
+    ctx.font = `11px ${FONT_UI}`;
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.fillText(pick.summary, cx, sy + 66);
+
     // Controls, along the bottom.
     ctx.fillStyle = "rgba(255,255,255,0.4)";
     ctx.font = `12px ${FONT_UI}`;
@@ -1763,7 +1894,7 @@ export class Renderer {
     ctx.font = `14px ${FONT_UI}`;
   }
 
-  private drawBriefingScreen(ctx: CanvasRenderingContext2D, vw: number, vh: number): void {
+  private drawBriefingScreen(ctx: CanvasRenderingContext2D, game: Game, vw: number, vh: number): void {
     ctx.fillStyle = "rgba(6,9,16,0.82)";
     ctx.fillRect(0, 0, vw, vh);
     ctx.textBaseline = "top";
@@ -1780,6 +1911,8 @@ export class Renderer {
       "Mine minerals to fund your rig, upgrade the drill and tank,",
       "and descend to reach it. There's no refuelling down there —",
       "watch your gauge, and don't get greedy.",
+      // The season's own flavour line — data, so a new season needs no code here.
+      game.season.briefing,
     ];
     lines.forEach((l, i) => center(ctx, l, vw, vh * 0.24 + 80 + i * 24));
     const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);

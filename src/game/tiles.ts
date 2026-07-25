@@ -18,6 +18,11 @@ export enum TileId {
   // filler material changes with depth: topsoil dirt → stone → granite.
   Stone,
   Granite,
+  // Seasonal filler pockets (seasons.ts). Ordinary diggable solids, so physics,
+  // collision, drilling and the depth pass need no special-casing — but drilling
+  // one quenches heat instead of spiking it (heat.ts's digHeatDelta).
+  Water, // spring meltwater: soft, quenches
+  Ice, // winter frozen ground: tough, quenches hard
 }
 
 export interface TileDef {
@@ -50,6 +55,9 @@ export const TILE_DEFS: Record<TileId, TileDef> = {
   // Diggable strata — deeper materials are tougher (hardness still ×depth-scale).
   [TileId.Stone]: { name: "stone", color: "#6b625a", solid: true, hardness: 0.34, value: 0, cargoUnits: 0 },
   [TileId.Granite]: { name: "granite", color: "#8f8894", solid: true, hardness: 0.6, value: 0, cargoUnits: 0 },
+  // Seasonal pockets — diggable (never impassable) and worthless, but they shed heat.
+  [TileId.Water]: { name: "meltwater", color: "#3c7fa8", solid: true, hardness: 0.12, value: 0, cargoUnits: 0 },
+  [TileId.Ice]: { name: "ice", color: "#a8d8ea", solid: true, hardness: 0.5, value: 0, cargoUnits: 0 },
 };
 
 /**

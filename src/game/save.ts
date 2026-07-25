@@ -1,6 +1,7 @@
 import type { Cargo } from "./economy";
 import { sanitizeInventory, type Inventory } from "./items";
 import type { Player } from "./player";
+import { isSeasonId, type SeasonId } from "./seasons";
 import type { TileId } from "./tiles";
 import { UPGRADES, type UpgradeState, type UpgradeTrack } from "./upgrades";
 import type { World } from "./world";
@@ -59,6 +60,16 @@ export interface SaveData {
   upgrades: UpgradeState;
   /** Owned/equipped module ids. Absent in pre-module saves → treated as empty. */
   modules?: { owned: string[]; equipped: string[] };
+  /**
+   * The season this world was generated under. This is a *worldgen input*, on a
+   * par with `seed`: the world is reconstructed by re-running generation from
+   * the seed, so without the season the same seed would rebuild different
+   * terrain. Absent in pre-season saves — those worlds were generated with no
+   * seasonal modifiers at all, so they reload with `World`'s neutral (null)
+   * season and come back bit-identical. They're *presented* as the default
+   * season, which is cosmetic only.
+   */
+  season?: SeasonId;
 }
 
 export function captureSave(
@@ -83,6 +94,10 @@ export function captureSave(
     money,
     upgrades: { ...upgrades },
     modules: { owned: [...modules.owned], equipped: [...modules.equipped] },
+    // The world carries its season the same way it carries its seed, so this
+    // needs no extra argument. Undefined for a legacy (pre-season) world, which
+    // JSON.stringify drops — exactly the shape such a save had before.
+    season: world.season?.id,
   };
 }
 
@@ -126,6 +141,10 @@ export function parseSave(json: string): SaveData | null {
             equipped: m.equipped.filter((x) => typeof x === "string"),
           }
         : { owned: [], equipped: [] };
+    // Season is optional and validated leniently, like modules. Anything
+    // unrecognised falls back to undefined = neutral worldgen, which is the
+    // only reconstruction that can't be wrong for a save we can't read.
+    if (!isSeasonId(data.season)) delete data.season;
     return data;
   } catch {
     return null;

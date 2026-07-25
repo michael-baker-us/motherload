@@ -149,6 +149,9 @@ export const WORLDGEN = {
   caveThresholdNear: 0.82, // sparse just below the intro zone
   caveThresholdDeep: 0.6, // roomy caverns deep down
   caveDepthFull: 800, // depth at which caves reach full density
+  // Seasonal filler pockets (meltwater, ice) — coherent bodies, not speckle, so
+  // they read as pockets you break into rather than grit in the rock.
+  pocketFreq: 0.13,
 };
 
 export const DRILL = {
@@ -189,6 +192,37 @@ export const HAZARDS = {
   lavaDamage: 8,
   fallThreshold: 480, // px/s of impact the hull absorbs for free
   fallFactor: 0.08, // HP per px/s beyond the threshold
+};
+
+/**
+ * Seasons: base magnitudes and global intensity dials. The season *table*
+ * (game/seasons.ts) holds identity, palette, and dimensionless multipliers;
+ * these are what those multipliers scale — the same split as `biome.rumble`
+ * against the rumble base gain in audio/engine.ts. Turning a dial here retunes
+ * every season at once; retuning one season is a table edit.
+ */
+export const SEASON = {
+  weather: {
+    ratePerSec: 14, // base ambient particle spawn rate at the surface
+    budget: 120, // max concurrent weather particles (of FX.maxParticles)
+    reducedMotionScale: 0.4, // photosensitivity: thin weather out, don't kill it
+  },
+  grade: {
+    tintAlpha: 0.14, // peak multiply-wash alpha at the surface
+    liftAlpha: 0.06, // peak additive highlight lift
+    strength: 1, // global multiplier on the whole colour grade
+    depthFade: 1, // how strongly the grade fades with depth (0 = never)
+  },
+  fogMix: 0.3, // how far a season pulls the biome fog colour toward its own
+  wind: {
+    accel: 260, // px/s² peak gust at depth 0, × season.runtime.gust
+    depth: 14, // tiles below surface where gusts die out
+    gustHz: 0.11, // base gust period
+  },
+  windStrength: 1, // global multiplier on surface gusts
+  quench: { water: 18, ice: 30 }, // heat shed when a seasonal pocket tile is drilled
+  audio: { minGap: 4, maxGap: 11, volume: 1 }, // seconds between surface ambience one-shots
+  flora: { treeline: 26, props: 34, density: 1, seed: 1717 }, // backdrop trees + surface props
 };
 
 // Heat: a second resource axis. Depth and the magma biome push heat up; the

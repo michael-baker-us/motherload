@@ -366,3 +366,56 @@ export function updateDrillVoice(
   v.motor.frequency.setTargetAtTime(78 + progress * 26, now, 0.08);
   v.motorFilter.frequency.setTargetAtTime(230 + progress * 320, now, 0.06);
 }
+
+// --- Seasonal surface ambience -------------------------------------------
+// These deliberately break the "everything passes a 2 kHz lowpass" rule that
+// governs the rest of this file: birdsong and cricket stridulation *are* high
+// frequency content, and rolling them off makes them read as muffled noise
+// rather than as animals. They're kept quiet and sparse instead, and gated on
+// being near the surface, so they sit under the mix rather than on top of it.
+
+/** A short birdsong phrase — two to four rising chirps. */
+export function playBirdCall(ctx: BaseAudioContext, out: AudioNode, gain = 1): void {
+  const notes = 2 + Math.floor(Math.random() * 3);
+  const root = 2400 + Math.random() * 900;
+  for (let i = 0; i < notes; i++) {
+    const f = root * (1 + i * 0.12) * (0.94 + Math.random() * 0.12);
+    tone(ctx, out, {
+      type: "sine",
+      freqFrom: f,
+      freqTo: f * (1.18 + Math.random() * 0.22),
+      gain: (0.02 + Math.random() * 0.018) * gain,
+      duration: 0.05 + Math.random() * 0.03,
+      at: i * (0.07 + Math.random() * 0.05),
+    });
+  }
+}
+
+/** A cicada/cricket rasp — a burst of very short filtered noise chirps. */
+export function playInsectChirp(ctx: BaseAudioContext, out: AudioNode, gain = 1): void {
+  const pulses = 6 + Math.floor(Math.random() * 5);
+  const centre = 4200 + Math.random() * 1400;
+  for (let i = 0; i < pulses; i++) {
+    // Taper the burst so it swells and dies rather than starting flat.
+    const env = Math.sin((i / pulses) * Math.PI);
+    noiseHit(ctx, out, {
+      filter: "bandpass",
+      freqFrom: centre,
+      gain: 0.016 * env * gain,
+      duration: 0.018,
+      at: i * 0.028,
+    });
+  }
+}
+
+/** A long wind swell — the audible half of an autumn/winter gust. */
+export function playWindGust(ctx: BaseAudioContext, out: AudioNode, gain = 1): void {
+  noiseHit(ctx, out, {
+    filter: "bandpass",
+    freqFrom: 380,
+    freqTo: 170,
+    gain: 0.05 * gain,
+    duration: 1.4 + Math.random() * 0.8,
+    playbackRate: 0.5,
+  });
+}

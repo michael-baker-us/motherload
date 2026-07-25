@@ -27,6 +27,8 @@ export interface HudData {
   dev: boolean;
   /** Consumables in hotkey order: [key] TAG ×count pills, dimmed when empty. */
   items: Array<{ key: string; tag: string; icon: IconId; count: number }>;
+  /** The run's season — a permanent, quiet chip so it's never a mystery. */
+  season: { label: string; color: string; icon: IconId };
 }
 
 const PANEL_W = 190;
@@ -117,6 +119,19 @@ export class Hud {
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     const depthText = `${data.depth} m`;
     ctx.fillText(depthText, 12 + PANEL_W - 14 - ctx.measureText(depthText).width, 29);
+
+    // Season chip in the dead row between the depth readout and the first bar:
+    // small, tinted to the season, and always on screen so the player never has
+    // to guess which season they're running.
+    const icon = iconCanvas(data.season.icon, 11);
+    ctx.drawImage(icon, 24, 33, 11, 11);
+    ctx.font = `bold 8px ${MONO}`;
+    ctx.fillStyle = data.season.color;
+    ctx.globalAlpha = 0.75;
+    ctx.letterSpacing = "1.5px";
+    ctx.fillText(data.season.label.toUpperCase(), 39, 42);
+    ctx.letterSpacing = "0px";
+    ctx.globalAlpha = 1;
 
     const pulse = 0.55 + 0.45 * Math.sin(this.time * 7);
     this.bar(ctx, "FUEL", 50, this.shownFuel, data.fuel / data.maxFuel < 0.25, palette.good, pulse);

@@ -8,7 +8,8 @@
  * and added back additively. Working small keeps the (relatively pricey) blur
  * cheap; there's no scene readback, so nothing stalls the GPU pipeline.
  */
-import { POST } from "../game/config";
+import { POST, SEASON } from "../game/config";
+import type { GradeSpec } from "../game/seasons";
 import type { Emitter } from "./lights";
 
 export class PostFX {
@@ -78,6 +79,56 @@ export class PostFX {
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = a;
     ctx.fillStyle = this.heatGrad;
+    ctx.fillRect(0, 0, screenW, screenH);
+    ctx.restore();
+  }
+
+  /**
+   * The season's colour grade — a film-stock pass over the finished frame.
+   * Two flat full-screen fills, no readback: a `multiply` wash pulls the
+   * shadows toward the season's hue, then a `lighter` pass lifts the highlights.
+   * `strength` is how much of the frame is surface (it fades to 0 with depth),
+   * so the deep keeps reading as the biome's rather than the season's.
+   */
+  grade(
+    ctx: CanvasRenderingContext2D,
+    spec: GradeSpec,
+    strength: number,
+    screenW: number,
+    screenH: number,
+  ): void {
+    const k = strength * SEASON.grade.strength;
+    if (k <= 0.01) return;
+    const tintA = SEASON.grade.tintAlpha * spec.tintScale * k;
+    const liftA = SEASON.grade.liftAlpha * spec.liftScale * k;
+    ctx.save();
+    if (tintA > 0.004) {
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = tintA;
+      ctx.fillStyle = `rgb(${spec.tint[0]},${spec.tint[1]},${spec.tint[2]})`;
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
+    if (liftA > 0.004) {
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = liftA;
+      ctx.fillStyle = `rgb(${spec.lift[0]},${spec.lift[1]},${spec.lift[2]})`;
+      ctx.fillRect(0, 0, screenW, screenH);
+    }
+    ctx.restore();
+  }
+
+  /** A flat full-screen colour wash — used by transient weather spells. */
+  wash(
+    ctx: CanvasRenderingContext2D,
+    color: string,
+    alpha: number,
+    screenW: number,
+    screenH: number,
+  ): void {
+    if (alpha <= 0.004) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
     ctx.fillRect(0, 0, screenW, screenH);
     ctx.restore();
   }

@@ -41,7 +41,12 @@ export function gasChanceAt(depth: number): number {
   return Math.min(0.006 + (depth - HAZARDS.gasMinDepth) * 0.00002, HAZARDS.gasMaxChance);
 }
 
-export function lavaChanceAt(depth: number): number {
+/**
+ * `mult` is the season's lava modifier. Applied *after* the max-chance clamp on
+ * purpose: a hot season should genuinely get more lava down deep, not saturate
+ * at the same ceiling as every other season.
+ */
+export function lavaChanceAt(depth: number, mult = 1): number {
   if (depth < HAZARDS.lavaMinDepth) return 0;
-  return Math.min(0.008 + (depth - HAZARDS.lavaMinDepth) * 0.00002, HAZARDS.lavaMaxChance);
+  return Math.min(0.008 + (depth - HAZARDS.lavaMinDepth) * 0.00002, HAZARDS.lavaMaxChance) * mult;
 }

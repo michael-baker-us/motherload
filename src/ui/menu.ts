@@ -10,9 +10,11 @@ import {
   type Action,
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
+import { SEASONS } from "../game/seasons";
 import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
 import { FONT_UI } from "../render/fonts";
 import { iconImg, type IconId } from "../render/icons";
+import { palette } from "../render/palette";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFuel", "Unlimited fuel"],
@@ -122,6 +124,11 @@ export class MenuOverlay {
   private render(game: Game): void {
     if (!this.body) return;
     this.body.replaceChildren();
+
+    // The run's season, read-only: it was fixed when the world was generated.
+    this.section("World");
+    this.line(`${game.season.name} · ${game.season.tagline}`, palette.amber);
+    this.line(game.season.summary, "rgba(255,255,255,0.5)");
 
     this.section("Display");
     this.card({
@@ -233,6 +240,16 @@ export class MenuOverlay {
         this.card({
           icon: "◈", title: biome.name, sub: `warp · ${biome.minDepth}m`, actionLabel: "Warp",
           onClick: () => { game.devWarpToDepth(biome.minDepth + 15); this.close(); },
+        });
+      }
+      // Season swap is presentation + runtime only — the terrain half was baked
+      // at generation and re-rolling it under a live pod would desync the save.
+      for (const season of SEASONS) {
+        this.card({
+          icon: "◈", iconId: season.look.iconId as IconId, title: season.name,
+          sub: "look & feel only · terrain is fixed", actionLabel: "Set",
+          on: game.season.id === season.id,
+          onClick: () => { game.devSetSeason(season.id); this.close(); },
         });
       }
       this.card({

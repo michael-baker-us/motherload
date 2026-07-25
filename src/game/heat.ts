@@ -5,7 +5,8 @@
  * hull cooks. Pure and framework-free so it unit-tests without a canvas; the
  * lava-drill spike is a discrete event `game.ts` adds separately.
  */
-import { HEAT } from "./config";
+import { HEAT, SEASON } from "./config";
+import { TileId } from "./tiles";
 
 export interface HeatInput {
   /** Current heat, in the same units as `maxHeat`. */
@@ -45,4 +46,23 @@ export function stepHeat(dt: number, i: HeatInput): HeatResult {
   const heat = Math.max(0, Math.min(i.maxHeat, raw));
   const overheatDamage = raw > i.maxHeat ? HEAT.overheatDamage * dt : 0;
   return { heat, overheatDamage };
+}
+
+/**
+ * One-shot heat change from drilling through a tile: lava spikes, seasonal
+ * pockets quench, everything else is neutral. Generalises what used to be a
+ * hard-coded lava spike in game.ts, so a new heat-bearing tile is a case here
+ * rather than another branch at the call site.
+ */
+export function digHeatDelta(tile: TileId): number {
+  switch (tile) {
+    case TileId.Lava:
+      return HEAT.lavaSpike;
+    case TileId.Water:
+      return -SEASON.quench.water;
+    case TileId.Ice:
+      return -SEASON.quench.ice;
+    default:
+      return 0;
+  }
 }

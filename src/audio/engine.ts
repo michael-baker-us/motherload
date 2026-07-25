@@ -1,6 +1,8 @@
 import { biomeAt } from "../game/biomes";
+import { SEASON } from "../game/config";
 import type { FxEvent, Game } from "../game/game";
 import type { SaveStorage } from "../game/save";
+import { windAccelAt, type SeasonVoice } from "../game/seasons";
 import { clampVolume, saveAudioSettings, VOLUME_STEP, type AudioSettings } from "./settings";
 import * as sfx from "./sfx";
 
@@ -17,6 +19,22 @@ const PAD_CHORDS = [
   [196.0, 246.94, 392.0, 493.88], // G   G3 B3 G4 B4
 ];
 const CHORD_SECONDS = 5;
+
+/**
+ * Surface ambience by season voice. A table rather than a switch so adding a
+ * season that reuses a voice is a data change; only a genuinely new *sound*
+ * needs new synthesis. `render/seasons-render.test.ts` asserts every season's
+ * voice has an entry here.
+ */
+export const AMBIENCE: Record<
+  SeasonVoice,
+  ((ctx: BaseAudioContext, out: AudioNode, gain: number) => void) | null
+> = {
+  none: null,
+  birds: sfx.playBirdCall,
+  insects: sfx.playInsectChirp,
+  gust: sfx.playWindGust,
+};
 
 /** Stereo pan in [-1, 1] for a world-x relative to the listener; ±1 at halfWidth away. */
 export function panFor(worldX: number, listenerX: number, halfWidth: number): number {
@@ -64,6 +82,10 @@ export class AudioEngine {
   private chordIdx = 0;
   private chordTimer = CHORD_SECONDS;
   private arpTimer = 3;
+  /** Countdown to the next seasonal surface ambience one-shot. */
+  private ambienceTimer = 2;
+  /** Last wind filter type applied — AudioParam ramps can't change node type. */
+  private windType: BiquadFilterType | null = null;
   // Listener position for stereo panning of one-shots, refreshed each frame.
   private listenerX = 0;
   private listenerHalfW = 400;
@@ -142,9 +164,38 @@ export class AudioEngine {
     const digging = playing && p.hasDigTarget;
     if (this.drill) sfx.updateDrillVoice(this.drill, digging, p.digProgress, now);
 
-    // Ambient beds crossfade with depth: wind topside, rumble down deep.
+    // Ambient beds crossfade with depth: wind topside, rumble down deep. The
+    // season sets the wind's level and tone — autumn howls bright and gusty,
+    // summer is a low warm hush — the same way the biome flavours the rumble.
     const depth = game.depth;
-    this.setLoop(this.wind, Math.max(0, 1 - depth / 12) * 0.045, now, 0.4);
+    const season = game.season;
+    const surfaceW = Math.max(0, 1 - depth / 12);
+    // Autumn's bed swells with the *same* gust the physics applies, so the wind
+    // you hear and the wind that shoves the pod are one gust.
+    const gustPush = Math.abs(windAccelAt(season, depth, game.runTime)) / (SEASON.wind.accel || 1);
+    const windGain = surfaceW * 0.045 * season.sound.wind.gain * (1 + gustPush * 0.8);
+    this.setLoop(this.wind, windGain, now, 0.4);
+    if (this.wind) {
+      this.wind.filter.frequency.setTargetAtTime(season.sound.wind.freq, now, 0.6);
+      // Filter *type* can't be ramped, so only touch it when it actually changes.
+      if (this.windType !== season.sound.wind.type) {
+        this.windType = season.sound.wind.type;
+        this.wind.filter.type = this.windType;
+      }
+    }
+
+    // Sporadic surface ambience — birdsong, cicadas, gusts. Table-dispatched so
+    // a new season reusing an existing voice needs no code here.
+    const voice = AMBIENCE[season.sound.ambience.voice];
+    if (playing && voice && depth < season.sound.surfaceDepth) {
+      this.ambienceTimer -= dt;
+      if (this.ambienceTimer <= 0) {
+        this.ambienceTimer =
+          SEASON.audio.minGap + Math.random() * (SEASON.audio.maxGap - SEASON.audio.minGap);
+        voice(ctx, this.master, season.sound.ambience.gain * SEASON.audio.volume);
+        this.playedCount++;
+      }
+    }
     // Rumble bed flavoured by biome — intensity and tone (magma roars bright,
     // the deep is a low sub-drone).
     const biome = biomeAt(depth);

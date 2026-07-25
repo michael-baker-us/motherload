@@ -39,3 +39,21 @@ describe("hazard spawn depth gates", () => {
     expect(lavaChanceAt(100000)).toBe(HAZARDS.lavaMaxChance);
   });
 });
+
+describe("seasonal lava multiplier", () => {
+  const deep = HAZARDS.lavaMinDepth + 900; // well past the max-chance clamp
+
+  it("defaults to unchanged", () => {
+    expect(lavaChanceAt(deep, 1)).toBe(lavaChanceAt(deep));
+  });
+
+  it("scales linearly, applied after the clamp so a hot season really is hotter", () => {
+    expect(lavaChanceAt(deep)).toBe(HAZARDS.lavaMaxChance); // clamped
+    expect(lavaChanceAt(deep, 2)).toBeCloseTo(HAZARDS.lavaMaxChance * 2);
+    expect(lavaChanceAt(deep, 0.5)).toBeCloseTo(HAZARDS.lavaMaxChance * 0.5);
+  });
+
+  it("stays at zero above the lava line whatever the multiplier", () => {
+    expect(lavaChanceAt(HAZARDS.lavaMinDepth - 1, 5)).toBe(0);
+  });
+});

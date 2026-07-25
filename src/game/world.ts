@@ -3,6 +3,7 @@ import { SLICE, WORLDGEN } from "./config";
 import { gasChanceAt, lavaChanceAt } from "./hazards";
 import { fbm2d, fieldMeanPow, fieldSamples, tailThreshold } from "./noise";
 import { hash2d } from "./rng";
+import type { Season } from "./seasons";
 import { STATIONS } from "./stations";
 import {
   MINERAL_BANDS,
@@ -24,6 +25,7 @@ const VEIN_FIELD = 0x165667b1;
 const VEIN_DRAW = 0xd3a2646c;
 const CAVE_FIELD = 0x1b873593;
 const STRATUM_FIELD = 0x2545f491;
+const POCKET_FIELD = 0x7feb352d;
 /** How far (tiles) the stratum boundaries waver, so bands aren't hard lines. */
 const STRATUM_BLEND = 34;
 
@@ -46,9 +48,12 @@ export class World {
   private readonly veinFieldSeed: number;
   private readonly caveFieldSeed: number;
   private readonly stratumFieldSeed: number;
+  private readonly pocketFieldSeed: number;
   private readonly rockNorm: number;
   /** Empirical CDF of the vein field — turns a target area into a mask threshold. */
   private readonly veinCdf: Float64Array;
+  /** Same, for seasonal pockets. Null unless this season actually has pockets. */
+  private readonly pocketCdf: Float64Array | null = null;
 
   constructor(
     readonly width: number,
@@ -56,6 +61,15 @@ export class World {
     readonly surfaceRow: number,
     readonly seed: number,
     readonly tileSize: number,
+    /**
+     * The season this terrain was generated under. Only `season.world` is ever
+     * read here — the runtime half is re-read every sim step and must not leak
+     * into generation, or a save/load would rebuild different terrain.
+     *
+     * `null` means "generated before seasons existed": it reproduces the
+     * pre-seasons output exactly, which is what a legacy save needs.
+     */
+    readonly season: Season | null = null,
   ) {
     this.tiles = new Uint8Array(width * height);
     this.pixelWidth = width * tileSize;
@@ -65,6 +79,7 @@ export class World {
     this.veinFieldSeed = seed ^ VEIN_FIELD;
     this.caveFieldSeed = seed ^ CAVE_FIELD;
     this.stratumFieldSeed = seed ^ STRATUM_FIELD;
+    this.pocketFieldSeed = seed ^ POCKET_FIELD;
     // Normalise the placement weights so biasing ore/rock toward high field
     // values leaves the average spawn density equal to the chance curves.
     // The fBm field is stationary, so one estimate serves every mineral band.
@@ -75,6 +90,13 @@ export class World {
     this.veinCdf = fieldSamples((x, y) =>
       fbm2d(x * WORLDGEN.veinFreq, y * WORLDGEN.veinFreq, this.veinFieldSeed),
     );
+    // Only sampled when this season actually places pockets, so the other
+    // seasons pay nothing for the feature.
+    if (season?.world.pocket) {
+      this.pocketCdf = fieldSamples((x, y) =>
+        fbm2d(x * WORLDGEN.pocketFreq, y * WORLDGEN.pocketFreq, this.pocketFieldSeed),
+      );
+    }
 
     this.generate();
   }
@@ -224,7 +246,10 @@ export class World {
 
     // Hazards stay sparse speckle — a hidden trap shouldn't clump into a wall.
     if (hash2d(x, y, GAS_DRAW ^ this.seed) < gasChanceAt(depth)) return TileId.GasPocket;
-    if (hash2d(x, y, LAVA_DRAW ^ this.seed) < lavaChanceAt(depth)) return TileId.Lava;
+    const sw = this.season?.world;
+    if (hash2d(x, y, LAVA_DRAW ^ this.seed) < lavaChanceAt(depth, sw?.lavaChanceMult ?? 1)) {
+      return TileId.Lava;
+    }
 
     // Ore veins: each mineral occupies vein regions where its field crosses a
     // threshold; fill feathers from a sparse edge to a dense core. First band
@@ -234,7 +259,7 @@ export class World {
       const base = bandChanceAt(band, depth);
       if (base <= 0) continue;
       // Vein area that reproduces this mineral's average density given the fill.
-      const area = Math.min(0.5, (base / meanFill) * WORLDGEN.veinAreaScale);
+      const area = Math.min(0.5, (base / meanFill) * WORLDGEN.veinAreaScale * (sw?.oreAreaMult ?? 1));
       const thr = tailThreshold(this.veinCdf, area);
       const fieldSeed = (this.veinFieldSeed + band.tile * 0x9e3779b1) | 0;
       const f = fbm2d(x * WORLDGEN.veinFreq, y * WORLDGEN.veinFreq, fieldSeed);
@@ -245,6 +270,15 @@ export class World {
       const drawSeed = ((VEIN_DRAW ^ this.seed) + band.tile * 0x85ebca6b) | 0;
       if (hash2d(x, y, drawSeed) < fill) return band.tile;
     }
+    // Seasonal pockets: meltwater in spring, ice in winter. Placed last, so they
+    // replace *filler only* — a pocket can never eat an ore vein, block a cave,
+    // or (since pocket tiles are always diggable) wall the shaft off.
+    const pocket = sw?.pocket;
+    if (pocket && this.pocketCdf && depth >= pocket.minDepth && depth <= pocket.maxDepth) {
+      const f = fbm2d(x * WORLDGEN.pocketFreq, y * WORLDGEN.pocketFreq, this.pocketFieldSeed);
+      if (f > tailThreshold(this.pocketCdf, pocket.area)) return pocket.tile;
+    }
+
     // Diggable filler: the stratum for this depth, its boundary wavered by noise.
     const waver = (fbm2d(x * 0.05, y * 0.05, this.stratumFieldSeed) - 0.5) * STRATUM_BLEND;
     return stratumAt(depth + waver);

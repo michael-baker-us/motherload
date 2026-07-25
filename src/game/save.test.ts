@@ -8,8 +8,10 @@ import {
   loadSave,
   parseSave,
   writeSave,
+  CURRENT_SAVE_VERSION,
   type SaveStorage,
 } from "./save";
+import { seasonById } from "./seasons";
 import { TileId } from "./tiles";
 import { createUpgradeState } from "./upgrades";
 import { World } from "./world";
@@ -110,5 +112,51 @@ describe("parseSave validation", () => {
     data.upgrades.drill = 99;
     const parsed = parseSave(JSON.stringify(data));
     expect(parsed!.upgrades.drill).toBe(3); // last real tier
+  });
+});
+
+describe("season persistence", () => {
+  // The season is a worldgen input, on a par with the seed: without it the same
+  // seed would reconstruct different terrain. These pin that contract.
+  const world = (season?: Parameters<typeof seasonById>[0]) =>
+    new World(60, 200, 6, 99, 32, season ? seasonById(season) : null);
+  const capture = (w: World) =>
+    captureSave(w, createPlayer(w), 0, createUpgradeState());
+
+  it("round-trips the season through JSON", () => {
+    const data = parseSave(JSON.stringify(capture(world("winter"))));
+    expect(data?.season).toBe("winter");
+  });
+
+  it("omits the season for a pre-season world", () => {
+    const data = parseSave(JSON.stringify(capture(world())));
+    expect(data?.season).toBeUndefined();
+  });
+
+  it("drops an unrecognised season rather than guessing", () => {
+    const raw = JSON.parse(JSON.stringify(capture(world("spring")))) as Record<string, unknown>;
+    raw.season = "monsoon";
+    expect(parseSave(JSON.stringify(raw))?.season).toBeUndefined();
+  });
+
+  it("needs no version bump — season is an optional field like modules", () => {
+    expect(CURRENT_SAVE_VERSION).toBe(1);
+  });
+
+  it("reconstructs a legacy save's terrain bit-identically", () => {
+    // A save with no season rebuilds with World's neutral season, which is the
+    // only reconstruction that can't be wrong for a world generated before
+    // seasons existed.
+    const original = world();
+    const data = parseSave(JSON.stringify(capture(original)))!;
+    const rebuilt = new World(60, 200, 6, data.seed, 32, data.season ? seasonById(data.season) : null);
+    expect(rebuilt.tiles).toEqual(original.tiles);
+  });
+
+  it("reconstructs a seasonal save's terrain bit-identically", () => {
+    const original = world("winter");
+    const data = parseSave(JSON.stringify(capture(original)))!;
+    const rebuilt = new World(60, 200, 6, data.seed, 32, seasonById(data.season));
+    expect(rebuilt.tiles).toEqual(original.tiles);
   });
 });

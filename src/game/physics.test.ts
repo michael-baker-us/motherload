@@ -94,3 +94,50 @@ describe("pod physics", () => {
     expect(p.grounded).toBe(false);
   });
 });
+
+describe("seasonal wind", () => {
+  const airborne = (world: World) => {
+    const p = createPlayer(world);
+    p.y -= TILE * 3; // lift clear of the ground so nothing else touches vx
+    p.prevY = p.y;
+    return p;
+  };
+  const still: MoveInput = { thrustUp: false, moveLeft: false, moveRight: false };
+
+  it("accelerates a coasting pod sideways", () => {
+    const world = new World(20, 40, 6, 1, TILE);
+    const p = airborne(world);
+    p.vx = 0;
+    stepPlayer(p, world, { ...still, windAccel: 200 }, 0.1);
+    expect(p.vx).toBeCloseTo(20); // 200 px/s² × 0.1 s
+  });
+
+  it("pushes both ways", () => {
+    const world = new World(20, 40, 6, 1, TILE);
+    const p = airborne(world);
+    stepPlayer(p, world, { ...still, windAccel: -200 }, 0.1);
+    expect(p.vx).toBeCloseTo(-20);
+  });
+
+  it("can never push past the pod's own top speed", () => {
+    const world = new World(20, 40, 6, 1, TILE);
+    const p = airborne(world);
+    for (let i = 0; i < 200; i++) {
+      stepPlayer(p, world, { ...still, windAccel: 100000 }, 1 / 60);
+    }
+    expect(p.vx).toBeLessThanOrEqual(PHYSICS.maxVx * p.engineMult + 1e-6);
+  });
+
+  it("changes nothing when absent — the calm-season regression guard", () => {
+    const a = new World(20, 40, 6, 1, TILE);
+    const b = new World(20, 40, 6, 1, TILE);
+    const pa = airborne(a);
+    const pb = airborne(b);
+    for (let i = 0; i < 30; i++) {
+      stepPlayer(pa, a, still, 1 / 60);
+      stepPlayer(pb, b, { ...still, windAccel: 0 }, 1 / 60);
+    }
+    expect(pb.x).toBe(pa.x);
+    expect(pb.vx).toBe(pa.vx);
+  });
+});

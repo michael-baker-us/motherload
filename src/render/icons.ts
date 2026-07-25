@@ -44,7 +44,12 @@ export type IconId =
   | "mute"
   | "modules"
   | "pack"
-  | "boom";
+  | "boom"
+  // Seasons (game/seasons.ts references these by name)
+  | "seasonSpring"
+  | "seasonSummer"
+  | "seasonAutumn"
+  | "seasonWinter";
 
 const GRID = 24;
 const STEEL = "#9aa4b2";
@@ -516,7 +521,99 @@ const DRAW: Record<IconId, (ctx: CanvasRenderingContext2D) => void> = {
     ctx.arc(12, 12, 3, 0, Math.PI * 2);
     ctx.fill();
   },
+
+  // --- Seasons. Each is one unmistakable silhouette, since these render at
+  // ~12px in the HUD header band where detail would just turn to mush.
+  seasonSpring: (ctx) => {
+    // Five-petal bloom with a bright centre.
+    ctx.fillStyle = "#ffd7e8";
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+      ctx.beginPath();
+      ctx.ellipse(12 + Math.cos(a) * 5.4, 12 + Math.sin(a) * 5.4, 4, 3.2, a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#ffd23f";
+    ctx.beginPath();
+    ctx.arc(12, 12, 3, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  seasonSummer: (ctx) => {
+    // Sun disc with eight rays.
+    pen(ctx, "#ffd764", 2);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(12 + Math.cos(a) * 7, 12 + Math.sin(a) * 7);
+      ctx.lineTo(12 + Math.cos(a) * 10.5, 12 + Math.sin(a) * 10.5);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#ffd764";
+    ctx.beginPath();
+    ctx.arc(12, 12, 5.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff3c0";
+    ctx.beginPath();
+    ctx.arc(10.4, 10.4, 2, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  seasonAutumn: (ctx) => {
+    // A single falling leaf: blade, midrib, stem.
+    ctx.fillStyle = "#e0842a";
+    ctx.beginPath();
+    ctx.moveTo(12, 2.5);
+    ctx.bezierCurveTo(20, 7, 20, 15, 12, 19.5);
+    ctx.bezierCurveTo(4, 15, 4, 7, 12, 2.5);
+    ctx.closePath();
+    ctx.fill();
+    pen(ctx, "#a8442a", 1.4);
+    ctx.beginPath();
+    ctx.moveTo(12, 4);
+    ctx.lineTo(12, 21.5);
+    ctx.stroke();
+    pen(ctx, "#a8442a", 1);
+    for (const y of [8, 12, 16]) {
+      ctx.beginPath();
+      ctx.moveTo(12, y);
+      ctx.lineTo(12 + 4.5, y - 2.5);
+      ctx.moveTo(12, y);
+      ctx.lineTo(12 - 4.5, y - 2.5);
+      ctx.stroke();
+    }
+  },
+  seasonWinter: (ctx) => {
+    // Six-armed snowflake with barbs.
+    pen(ctx, "#dbeeff", 1.8);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const ex = 12 + Math.cos(a) * 10;
+      const ey = 12 + Math.sin(a) * 10;
+      ctx.beginPath();
+      ctx.moveTo(12, 12);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      const bx = 12 + Math.cos(a) * 6.2;
+      const by = 12 + Math.sin(a) * 6.2;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + Math.cos(a + 1) * 3.4, by + Math.sin(a + 1) * 3.4);
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + Math.cos(a - 1) * 3.4, by + Math.sin(a - 1) * 3.4);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(12, 12, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  },
 };
+
+/**
+ * Every implemented icon id. Exported so tables that reference icons by plain
+ * string (game/seasons.ts, which must not import from render/) can be checked
+ * against reality in a test rather than failing silently at draw time.
+ */
+export const ICON_IDS: readonly string[] = Object.keys(DRAW);
 
 /** Draw an icon into a canvas context, top-left anchored, scaled to `size` px. */
 export function drawIcon(ctx: CanvasRenderingContext2D, id: IconId, x: number, y: number, size: number): void {

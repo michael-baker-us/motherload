@@ -7,6 +7,8 @@ export interface MoveInput {
   thrustUp: boolean;
   moveLeft: boolean;
   moveRight: boolean;
+  /** External horizontal acceleration, px/s², signed — seasonal surface wind. */
+  windAccel?: number;
 }
 
 /**
@@ -31,6 +33,11 @@ export function stepPlayer(p: Player, world: World, input: MoveInput, dt: number
     p.vx *= Math.exp(-PHYSICS.hDrag * dt);
     if (Math.abs(p.vx) < 1) p.vx = 0;
   }
+  // Wind is applied after the steering/drag branch so it still pushes a coasting
+  // pod, and before the clamp so a gust can never fling you past your own top
+  // speed — it nudges the pod off line, it doesn't launch it into a wall.
+  if (input.windAccel) p.vx += input.windAccel * dt;
+
   if (input.thrustUp) p.vy -= PHYSICS.thrust * eng * dt;
   p.vy += PHYSICS.gravity * dt;
 

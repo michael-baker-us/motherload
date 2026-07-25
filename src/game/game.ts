@@ -4,9 +4,9 @@ import { BIOMES, biomeIndexAt } from "./biomes";
 import type { Input } from "../engine/input";
 import { MenuOverlay } from "../ui/menu";
 import { ShopOverlay } from "../ui/shop";
-import { DRILL, ECONOMY, FUEL, HEAT, HULL, SLICE, TILE, WORLD } from "./config";
+import { DRILL, ECONOMY, FUEL, HULL, SLICE, TILE, WORLD } from "./config";
 import { updateDrilling } from "./drilling";
-import { stepHeat } from "./heat";
+import { digHeatDelta, stepHeat } from "./heat";
 import { addToCargo, cargoUnits, cargoValue, refuelPlan, salvageFeeFor } from "./economy";
 import { Onboarding, type OnboardPrompt } from "./onboarding";
 import { digHazard, fallDamage } from "./hazards";
@@ -30,6 +30,14 @@ import {
   type SaveData,
   type SaveStorage,
 } from "./save";
+import {
+  DEFAULT_SEASON,
+  SEASONS,
+  seasonById,
+  windAccelAt,
+  type Season,
+  type SeasonId,
+} from "./seasons";
 import { stationInSpan, type Station } from "./stations";
 import { stratumAt, TILE_DEFS, TileId } from "./tiles";
 import {
@@ -101,6 +109,14 @@ export class Game {
   maxDepth = 0;
   /** Deepest biome index reached — so each biome announces itself only once. */
   deepestBiome = 0;
+  /**
+   * The season this run is being played in. Chosen on the title screen and then
+   * fixed: `season.world` fed worldgen, so changing it mid-run would desync the
+   * seed-plus-diff save. Only `season.runtime` and the visuals are live.
+   */
+  season: Season = seasonById(DEFAULT_SEASON);
+  /** Season highlighted on the title screen — applies to the next new game. */
+  titleSeason = 0;
   /** Dev readout for balance tuning — a display toggle, not a cheat. */
   showTelemetry = false;
   /** Armed dynamite (tile coords) — the renderer draws it, update() detonates it. */
@@ -128,9 +144,10 @@ export class Game {
   constructor(viewWidth: number, viewHeight: number, storage: SaveStorage | null = null) {
     this.storage = storage;
     this.pendingSave = storage ? loadSave(storage) : null;
-    // Each new game gets its own world; a save carries its seed with it.
+    // Each new game gets its own world; a save carries its seed and season.
+    // This placeholder is replaced by startNewGame/continueGame before play.
     const seed = Math.floor(Math.random() * 0x7fffffff);
-    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, seed, TILE);
+    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, seed, TILE, this.season);
     this.player = createPlayer(this.world);
     this.camera = new Camera(viewWidth, viewHeight);
   }
@@ -157,8 +174,19 @@ export class Game {
     return DRILL.basePower * currentTier("drill", this.upgrades).value * this.moduleMult("drillMult");
   }
 
-  startNewGame(): void {
+  /**
+   * Start a fresh run in `seasonId` (defaults to the title screen's selection).
+   * The season has to be resolved before the world is built — `season.world`
+   * feeds worldgen, and the save reconstructs terrain from seed + season.
+   */
+  startNewGame(seasonId: SeasonId = SEASONS[this.titleSeason]!.id): void {
     this.tainted = false; // a genuinely fresh run saves again
+    this.season = seasonById(seasonId);
+    const seed = Math.floor(Math.random() * 0x7fffffff);
+    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, seed, TILE, this.season);
+    const pod = createPlayer(this.world);
+    this.applyUpgrades(pod);
+    this.player = pod;
     this.state = "briefing"; // a mission-brief card precedes the first descent
     this.onboarding = new Onboarding();
     this.goalReached = false;
@@ -174,7 +202,19 @@ export class Game {
     const data = this.pendingSave;
     if (!data) return false;
     this.tainted = false; // a clean load saves again until a dev tool is used
-    this.world = new World(WORLD.width, WORLD.height, WORLD.surfaceRow, data.seed, TILE);
+    // A pre-season save has no `season`: it was generated with no seasonal
+    // modifiers, so it must rebuild with World's neutral (null) season to come
+    // back bit-identical. It's still *shown* in the default season — cosmetic only.
+    this.season = seasonById(data.season);
+    const worldSeason = data.season ? this.season : null;
+    this.world = new World(
+      WORLD.width,
+      WORLD.height,
+      WORLD.surfaceRow,
+      data.seed,
+      TILE,
+      worldSeason,
+    );
     applyWorldSave(this.world, data);
     Object.assign(this.upgrades, data.upgrades);
     this.ownedModules = new Set((data.modules?.owned ?? []).filter(isModuleId));
@@ -225,7 +265,12 @@ export class Game {
     if (this.toast && (this.toast.timeLeft -= dt) <= 0) this.toast = null;
 
     if (this.state === "title") {
-      if (input.wasPressed("Enter", "Space")) {
+      // ◂ ▸ pick the season for the next new game (a continued run keeps its own).
+      if (input.wasPressed("ArrowLeft")) {
+        this.titleSeason = (this.titleSeason + SEASONS.length - 1) % SEASONS.length;
+      } else if (input.wasPressed("ArrowRight")) {
+        this.titleSeason = (this.titleSeason + 1) % SEASONS.length;
+      } else if (input.wasPressed("Enter", "Space")) {
         if (!this.continueGame()) this.startNewGame();
       } else if (input.wasPressed("KeyN")) {
         this.startNewGame();
@@ -233,7 +278,11 @@ export class Game {
       return;
     }
     if (this.state === "briefing") {
-      if (input.wasPressed("Enter", "Space")) this.state = "playing";
+      if (input.wasPressed("Enter", "Space")) {
+        this.state = "playing";
+        // Name the season the way biomes name themselves on first entry.
+        this.showToast(`◈ ${this.season.name.toUpperCase()} · ${this.season.tagline}`, 3.5);
+      }
       return;
     }
     if (this.state === "shop" || this.state === "menu") return; // sim paused; the overlay owns input
@@ -279,6 +328,8 @@ export class Game {
       thrustUp: input.isDown(...keysFor("thrust")) && p.fuel > 0,
       moveLeft: input.isDown(...keysFor("left")),
       moveRight: input.isDown(...keysFor("right")),
+      // Seasonal surface gusts — autumn shoves you around near the top.
+      windAccel: windAccelAt(this.season, this.depth, this.runTime),
     };
     this.thrusting = move.thrustUp;
     stepPlayer(p, this.world, move, dt);
@@ -309,11 +360,13 @@ export class Game {
     if (dug !== null) {
       const cx = digX * TILE + TILE / 2;
       const cy = digY * TILE + TILE / 2;
+      // Lava spikes heat, seasonal pockets quench it. Applied before the hazard
+      // split because a quenching tile (meltwater, ice) is not a hazard at all.
+      p.heat = Math.max(0, Math.min(p.maxHeat, p.heat + digHeatDelta(dug)));
       const hazard = digHazard(dug);
       if (hazard) {
         this.showToast(hazard.toast, 2);
         this.pushFx({ kind: "explosion", x: cx, y: cy });
-        if (dug === TileId.Lava) p.heat = Math.min(p.maxHeat, p.heat + HEAT.lavaSpike);
         this.applyDamage(hazard.damage, hazard.cause);
         if (this.state !== "playing") return;
       } else {
@@ -339,6 +392,7 @@ export class Game {
     if (this.thrusting) burn += FUEL.thrustBurn;
     if (p.hasDigTarget) burn += FUEL.digBurn;
     burn *= this.moduleMult("burnMult"); // Fuel Recycler module trims this
+    burn *= this.season.runtime.burnMult; // cold seasons run the lines rich
     p.fuel = Math.max(0, p.fuel - burn * dt);
     if (p.fuel <= 0) {
       this.die("Out of fuel");
@@ -369,9 +423,11 @@ export class Game {
         heat: p.heat,
         maxHeat: p.maxHeat,
         depth: this.depth,
-        ambient: BIOMES[bi]!.heat,
+        // The season offsets the biome's ambient heat (summer bakes, winter
+        // bites) and scales the radiator on top of the Coolant upgrade.
+        ambient: BIOMES[bi]!.heat + this.season.runtime.ambientHeat,
         drilling: p.hasDigTarget,
-        coolMult: p.coolMult,
+        coolMult: p.coolMult * this.season.runtime.coolMult,
       });
       p.heat = heatStep.heat;
       if (p.heat >= p.maxHeat && !wasOverheating) this.showToast("OVERHEATING!", 2);
@@ -606,6 +662,19 @@ export class Game {
     // No fx here — the beacon, the audio sting, and the payoff screen carry it
     // (an "upgrade" fx would wrongly pop a "★ UPGRADED" reward number).
     this.saveNow();
+  }
+
+  /**
+   * Dev/test: switch the season's *presentation and runtime* modifiers without
+   * regenerating terrain. Deliberately does not touch the world — that half of
+   * the season was baked at generation, and re-rolling it under a live pod is
+   * exactly the desync the fixed-per-run design exists to prevent. Taints the
+   * run, so a season swapped for a look never overwrites a real save.
+   */
+  devSetSeason(id: SeasonId): void {
+    this.taint();
+    this.season = seasonById(id);
+    this.showToast(`◈ ${this.season.name.toUpperCase()} (visuals only)`, 3);
   }
 
   /**

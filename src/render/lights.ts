@@ -45,10 +45,14 @@ export interface Emitter {
  * Depth-driven ambient darkness in [0, LIGHT.maxDarkness]. Ramps in from
  * `darkStart` and saturates over the next `darkRamp` tiles. `centerDepthTiles`
  * is the depth (in tiles below the surface) at the centre of the view.
+ *
+ * `floor` is the season's minimum ambient darkness — winter's short, dim days
+ * never brighten all the way to zero even at the surface. Still capped at
+ * `maxDarkness`, so a season can't black the screen out.
  */
-export function darknessAt(centerDepthTiles: number): number {
+export function darknessAt(centerDepthTiles: number, floor = 0): number {
   const t = (centerDepthTiles - LIGHT.darkStart) / LIGHT.darkRamp;
-  return Math.max(0, Math.min(LIGHT.maxDarkness, t));
+  return Math.min(LIGHT.maxDarkness, Math.max(0, floor, t));
 }
 
 /**
