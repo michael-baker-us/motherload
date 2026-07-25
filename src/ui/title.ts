@@ -3,6 +3,7 @@ import { SEASONS } from "../game/seasons";
 import { FONT_UI } from "../render/fonts";
 import { iconImg, type IconId } from "../render/icons";
 import { viewPrefs } from "../render/prefs";
+import { layout, TAP_MIN } from "./layout";
 
 /**
  * The title screen's interactive half. The canvas keeps drawing the living sky
@@ -17,6 +18,11 @@ import { viewPrefs } from "../render/prefs";
  * The keyboard path in `Game.update` is untouched — Enter/N/◂ ▸ still work, and
  * the buttons call the very same `Game` methods.
  */
+/** Too little height for the full menu *and* the logo — a landscape phone. */
+function shortScreen(): boolean {
+  return layout.vh < 520;
+}
+
 export class TitleOverlay {
   private root: HTMLDivElement | null = null;
   private panel: HTMLDivElement | null = null;
@@ -33,13 +39,19 @@ export class TitleOverlay {
     root.style.cssText =
       "position:fixed;inset:0;z-index:6;display:none;pointer-events:none;" +
       "flex-direction:column;align-items:center;justify-content:flex-end;" +
-      `padding:0 16px 5vh;font-family:${FONT_UI};` +
+      // Bottom-anchored so the buttons sit in the thumb zone on a phone, above
+      // the home indicator; scrollable in case a short landscape screen can't
+      // fit the whole menu.
+      "padding:2vh 16px calc(4vh + env(safe-area-inset-bottom));" +
+      "padding-left:calc(16px + env(safe-area-inset-left));" +
+      "padding-right:calc(16px + env(safe-area-inset-right));" +
+      `font-family:${FONT_UI};overflow-y:auto;overscroll-behavior:contain;` +
       "user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;";
 
     const panel = document.createElement("div");
     panel.style.cssText =
       "pointer-events:auto;display:flex;flex-direction:column;align-items:stretch;gap:10px;" +
-      "width:420px;max-width:100%;";
+      "width:420px;max-width:100%;flex:none;";
     root.appendChild(panel);
 
     document.body.appendChild(root);
@@ -60,7 +72,9 @@ export class TitleOverlay {
       return;
     }
     // Cheap frame-to-frame guard: only rebuild when what's displayed changed.
-    const signature = `${game.hasSave}|${game.titleSeason}|${this.confirmingNew}`;
+    // Screen shape is part of that — rotating a phone reflows the menu.
+    const signature =
+      `${game.hasSave}|${game.titleSeason}|${this.confirmingNew}|${shortScreen()}`;
     if (signature === this.signature) return;
     this.signature = signature;
     this.render(game);
@@ -76,12 +90,14 @@ export class TitleOverlay {
     const panel = this.panel;
     if (!panel) return;
     panel.replaceChildren();
+    panel.style.gap = shortScreen() ? "7px" : "10px";
 
     // Primary action: continue the save if there is one, else start fresh.
     panel.appendChild(
       this.button({
         label: game.hasSave ? "▶  CONTINUE" : "▶  START DIGGING",
         hint: "Enter",
+        keyHint: true,
         primary: true,
         onClick: () => {
           if (!game.continueGame()) game.startNewGame();
@@ -96,7 +112,8 @@ export class TitleOverlay {
       row.appendChild(
         this.button({
           label: this.confirmingNew ? "OVERWRITE SAVE?" : "✦  NEW GAME",
-          hint: this.confirmingNew ? "click to confirm" : "N",
+          hint: this.confirmingNew ? "tap again to confirm" : "N",
+          keyHint: !this.confirmingNew,
           warn: this.confirmingNew,
           grow: true,
           onClick: () => {
@@ -124,11 +141,17 @@ export class TitleOverlay {
 
     this.seasonPicker(game);
 
-    const controls = document.createElement("div");
-    controls.textContent = "← →  move    ↑  thrust    ↓  drill    E  station";
-    controls.style.cssText =
-      "margin-top:4px;text-align:center;font-size:11px;color:rgba(255,255,255,0.42);";
-    panel.appendChild(controls);
+    if (!shortScreen()) {
+      const controls = document.createElement("div");
+      // Naming keys on a device with no keyboard is noise — describe the pod's
+      // verbs instead, and let the on-screen controls introduce themselves.
+      controls.textContent = layout.touch
+        ? "fly  ·  drill  ·  sell  ·  upgrade  ·  go deeper"
+        : "← →  move    ↑  thrust    ↓  drill    E  station";
+      controls.style.cssText =
+        "margin-top:4px;text-align:center;font-size:11px;color:rgba(255,255,255,0.42);";
+      panel.appendChild(controls);
+    }
   }
 
   /**
@@ -154,12 +177,14 @@ export class TitleOverlay {
       chip.type = "button";
       chip.setAttribute("aria-pressed", String(on));
       chip.style.cssText =
-        `flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;` +
+        `flex:1;min-width:0;min-height:${TAP_MIN + 10}px;display:flex;flex-direction:column;` +
+        "align-items:center;justify-content:center;gap:3px;padding:8px 2px;" +
         `font-family:${FONT_UI};font-size:10px;font-weight:bold;letter-spacing:1px;cursor:pointer;` +
-        `border:1px solid ${on ? season.look.accent : "rgba(255,255,255,0.14)"};border-radius:10px;` +
+        `border:1px solid ${on ? season.look.accent : "rgba(255,255,255,0.14)"};border-radius:12px;` +
         `background:${on ? "rgba(255,255,255,0.13)" : "rgba(10,12,18,0.6)"};` +
         `color:${on ? season.look.accent : "rgba(255,255,255,0.6)"};` +
-        "backdrop-filter:blur(6px);transition:background 0.12s,color 0.12s;";
+        "backdrop-filter:blur(6px);transition:background 0.12s,color 0.12s;" +
+        "touch-action:manipulation;-webkit-tap-highlight-color:transparent;";
       chip.appendChild(iconImg(season.look.iconId as IconId, 18));
       const name = document.createElement("span");
       name.textContent = season.name.toUpperCase();
@@ -183,10 +208,12 @@ export class TitleOverlay {
 
     const pick = SEASONS[game.titleSeason]!;
     const blurb = document.createElement("div");
-    blurb.textContent = `${pick.tagline} — ${pick.summary}`;
+    // The tagline alone on a short screen: the full summary would push the
+    // menu over the logo on a landscape phone.
+    blurb.textContent = shortScreen() ? pick.tagline : `${pick.tagline} — ${pick.summary}`;
     blurb.style.cssText =
       "padding:0 8px;text-align:center;font-size:11px;line-height:1.4;" +
-      "color:rgba(255,255,255,0.5);min-height:30px;";
+      `color:rgba(255,255,255,0.5);${shortScreen() ? "" : "min-height:30px;"}`;
     panel.appendChild(blurb);
   }
 
@@ -194,6 +221,8 @@ export class TitleOverlay {
   private button(opts: {
     label: string;
     hint: string;
+    /** The hint is a keyboard shortcut — dropped on touch devices. */
+    keyHint?: boolean;
     primary?: boolean;
     warn?: boolean;
     grow?: boolean;
@@ -209,19 +238,27 @@ export class TitleOverlay {
     btn.type = "button";
     btn.style.cssText =
       `flex:${opts.primary || opts.grow ? "1" : "0 1 auto"};display:flex;flex-direction:column;` +
-      `align-items:center;gap:2px;padding:${opts.primary ? "14px 18px" : "10px 16px"};` +
-      `font-family:${FONT_UI};cursor:pointer;border:1px solid ${skin.border};border-radius:12px;` +
+      `align-items:center;justify-content:center;gap:2px;` +
+      `min-height:${opts.primary && !shortScreen() ? TAP_MIN + 20 : TAP_MIN}px;` +
+      `padding:${opts.primary && !shortScreen() ? "14px 18px" : "10px 16px"};` +
+      `font-family:${FONT_UI};cursor:pointer;border:1px solid ${skin.border};border-radius:14px;` +
       `background:${skin.bg};color:${skin.fg};backdrop-filter:blur(8px);` +
-      "box-shadow:0 10px 26px rgba(0,0,0,0.45);transition:filter 0.12s,transform 0.12s;";
+      "box-shadow:0 10px 26px rgba(0,0,0,0.45);transition:filter 0.12s,transform 0.12s;" +
+      "touch-action:manipulation;-webkit-tap-highlight-color:transparent;";
 
     const label = document.createElement("span");
     label.textContent = opts.label;
     label.style.cssText =
       `font-size:${opts.primary ? "18px" : "13px"};font-weight:bold;letter-spacing:1.5px;`;
-    const hint = document.createElement("span");
-    hint.textContent = opts.hint;
-    hint.style.cssText = "font-size:10px;letter-spacing:1px;opacity:0.62;";
-    btn.append(label, hint);
+    btn.append(label);
+    // The hint names a key; on a touch device it would name something the
+    // player doesn't have. Consequence hints (the overwrite warning) stay.
+    if (opts.hint && !(layout.touch && opts.keyHint)) {
+      const hint = document.createElement("span");
+      hint.textContent = opts.hint;
+      hint.style.cssText = "font-size:10px;letter-spacing:1px;opacity:0.62;text-align:center;";
+      btn.append(hint);
+    }
 
     btn.addEventListener("mouseenter", () => {
       btn.style.filter = "brightness(1.15)";

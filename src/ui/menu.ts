@@ -10,12 +10,13 @@ import {
   type Action,
 } from "../engine/bindings";
 import type { DevCheats, Game } from "../game/game";
-import { gamePrefs, toggleTutorials } from "../game/prefs";
+import { gamePrefs, toggleTouchLayout, toggleTutorials } from "../game/prefs";
 import { SEASONS } from "../game/seasons";
 import { toggleDepthView, toggleHeadlampBeam, toggleReducedMotion, viewPrefs } from "../render/prefs";
 import { FONT_UI } from "../render/fonts";
 import { iconImg, type IconId } from "../render/icons";
 import { palette } from "../render/palette";
+import { actionButtonCss, closeButtonCss, layout, overlayPanelCss, overlayRootCss, TAP_MIN } from "./layout";
 
 const CHEAT_LABELS: Array<[keyof DevCheats, string]> = [
   ["unlimitedFuel", "Unlimited fuel"],
@@ -60,17 +61,11 @@ export class MenuOverlay {
     this.onClose = onClose;
 
     const root = document.createElement("div");
-    root.style.cssText =
-      "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;" +
-      `background:rgba(0,0,0,0.55);font-family:${FONT_UI};z-index:10;`;
+    root.style.cssText = overlayRootCss(FONT_UI);
 
     const panel = document.createElement("div");
     panel.style.cssText =
-      "position:relative;background:rgba(16,19,26,0.86);backdrop-filter:blur(14px);color:#e8e8e8;" +
-      "border:1px solid rgba(255,255,255,0.14);border-radius:16px;" +
-      "box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:20px 24px;width:560px;max-width:92vw;" +
-      // Scroll inside the panel when it's taller than the viewport.
-      "max-height:88vh;overflow-y:auto;" +
+      overlayPanelCss(560) +
       // fade/slide in on open (slide skipped under reduced-motion)
       "opacity:0;transition:opacity .18s ease, transform .18s ease;" +
       (viewPrefs.reducedMotion ? "" : "transform:translateY(10px) scale(0.985);");
@@ -86,14 +81,21 @@ export class MenuOverlay {
 
     const body = document.createElement("div");
     // Two-column grid so the many rows pack wide instead of one long scroll;
-    // collapses to a single column on narrow screens.
+    // collapses to a single column on narrow screens (`minmax` with a `min()`
+    // floor, so a 320px phone gets one full-width column rather than overflow).
     body.style.cssText =
-      "display:grid;grid-template-columns:repeat(auto-fit,minmax(232px,1fr));" +
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(232px,100%),1fr));" +
       "gap:8px;align-content:start;";
     panel.appendChild(body);
 
     const hint = document.createElement("div");
-    hint.textContent = onTitle ? "[Esc] back" : "[Esc] resume";
+    hint.textContent = layout.touch
+      ? onTitle
+        ? "✕ back"
+        : "✕ resume"
+      : onTitle
+        ? "[Esc] back"
+        : "[Esc] resume";
     hint.style.cssText = "margin-top:16px;color:#7f8ba3;font-size:11px;letter-spacing:0.5px;";
     panel.appendChild(hint);
 
@@ -150,6 +152,16 @@ export class MenuOverlay {
     // Onboarding is armed once, at startNewGame — say so rather than let a
     // mid-run toggle look broken.
     this.line("applies to the next new game", "rgba(255,255,255,0.4)");
+    // Only meaningful where there are on-screen controls to reshape.
+    if (layout.touch) {
+      const stick = gamePrefs.touchLayout === "stick";
+      this.card({
+        icon: "◉", title: "Touch controls",
+        sub: stick ? "floating thumbstick · one thumb" : "fixed ◀ ▼ ▶ buttons",
+        actionLabel: stick ? "Stick" : "Buttons", on: stick,
+        onClick: () => { toggleTouchLayout(window.localStorage); this.render(game); },
+      });
+    }
 
     this.section("Display");
     this.card({
@@ -392,9 +404,7 @@ export class MenuOverlay {
 
     const btn = document.createElement("button");
     btn.textContent = opts.actionLabel;
-    btn.style.cssText =
-      `flex:none;min-width:58px;padding:7px 13px;font-family:${FONT_UI};font-size:12px;font-weight:bold;` +
-      `cursor:pointer;color:#fff;border:none;border-radius:8px;background:${accent.btn};transition:filter 0.12s;`;
+    btn.style.cssText = actionButtonCss(FONT_UI, accent.btn);
     btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.2)"));
     btn.addEventListener("mouseleave", () => (btn.style.filter = ""));
     btn.addEventListener("click", opts.onClick);
@@ -425,11 +435,13 @@ export class MenuOverlay {
     info.append(title, sub);
 
     const step = (label: string, onClick: () => void): HTMLButtonElement => {
+      const size = layout.touch ? TAP_MIN : 32;
       const b = document.createElement("button");
       b.textContent = label;
       b.style.cssText =
-        `flex:none;width:32px;height:30px;padding:0;font-family:${FONT_UI};font-size:16px;line-height:1;` +
-        "cursor:pointer;color:#fff;border:none;border-radius:8px;background:rgba(255,255,255,0.1);transition:filter 0.12s;";
+        `flex:none;width:${size}px;height:${layout.touch ? TAP_MIN : 30}px;padding:0;` +
+        `font-family:${FONT_UI};font-size:18px;line-height:1;touch-action:manipulation;` +
+        "cursor:pointer;color:#fff;border:none;border-radius:10px;background:rgba(255,255,255,0.1);transition:filter 0.12s;";
       b.addEventListener("mouseenter", () => (b.style.filter = "brightness(1.3)"));
       b.addEventListener("mouseleave", () => (b.style.filter = ""));
       b.addEventListener("click", onClick);
@@ -445,8 +457,9 @@ export class MenuOverlay {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.style.cssText =
-      `grid-column:1/-1;width:100%;margin-top:4px;padding:11px 16px;font-family:${FONT_UI};` +
-      "font-size:14px;font-weight:bold;cursor:pointer;color:#fff;border:none;border-radius:10px;" +
+      `grid-column:1/-1;width:100%;margin-top:4px;padding:${layout.touch ? 15 : 11}px 16px;` +
+      `font-family:${FONT_UI};font-size:15px;font-weight:bold;cursor:pointer;color:#fff;` +
+      "border:none;border-radius:12px;touch-action:manipulation;" +
       "background:linear-gradient(180deg,#37954f,#2e7d46);transition:filter 0.12s;";
     btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.15)"));
     btn.addEventListener("mouseleave", () => (btn.style.filter = ""));
@@ -459,11 +472,7 @@ export class MenuOverlay {
     const btn = document.createElement("button");
     btn.textContent = "✕";
     btn.setAttribute("aria-label", "Close");
-    btn.style.cssText =
-      "position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;" +
-      `font-family:${FONT_UI};font-size:15px;line-height:1;cursor:pointer;color:#fff;` +
-      "border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
-      "background:rgba(255,255,255,0.08);";
+    btn.style.cssText = closeButtonCss(FONT_UI);
     btn.addEventListener("click", () => this.close());
     return btn;
   }

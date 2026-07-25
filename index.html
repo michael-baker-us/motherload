@@ -18,10 +18,13 @@
         touch-action: none;
         overscroll-behavior: none;
       }
+      /* dvh tracks mobile browser chrome sliding in and out; vh is the
+         fallback for engines that don't know it. */
       #game {
         display: block;
         width: 100vw;
         height: 100vh;
+        height: 100dvh;
         touch-action: none;
       }
     </style>

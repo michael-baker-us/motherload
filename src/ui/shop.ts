@@ -8,6 +8,7 @@ import { currentTier, nextTier, UPGRADES, type UpgradeTrack } from "../game/upgr
 import type { Game } from "../game/game";
 import { FONT_UI } from "../render/fonts";
 import { iconImg, type IconId } from "../render/icons";
+import { actionButtonCss, closeButtonCss, layout, overlayPanelCss, overlayRootCss, TAP_MIN } from "./layout";
 
 const TRACK_STAT: Record<UpgradeTrack, (value: number) => string> = {
   drill: (v) => `speed ×${v}`,
@@ -71,29 +72,26 @@ export class ShopOverlay {
     this.onClose = onClose;
 
     const root = document.createElement("div");
-    root.style.cssText =
-      "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;" +
-      `background:rgba(0,0,0,0.55);font-family:${FONT_UI};z-index:10;`;
+    root.style.cssText = overlayRootCss(FONT_UI);
 
     const panel = document.createElement("div");
-    panel.style.cssText =
-      "position:relative;background:rgba(16,19,26,0.86);backdrop-filter:blur(14px);color:#e8e8e8;" +
-      "border:1px solid rgba(255,255,255,0.14);border-radius:16px;" +
-      "box-shadow:0 24px 60px rgba(0,0,0,0.6);padding:20px 22px;width:410px;max-width:92vw;" +
-      "max-height:86vh;overflow-y:auto;";
+    panel.style.cssText = overlayPanelCss(430);
 
     const title = document.createElement("div");
     title.textContent = station.label;
     title.style.cssText =
-      "font-size:18px;font-weight:bold;margin-bottom:12px;letter-spacing:1px;";
+      "font-size:18px;font-weight:bold;margin-bottom:12px;letter-spacing:1px;" +
+      // Keep a long station name clear of the close button.
+      `padding-right:${layout.touch ? TAP_MIN + 8 : 34}px;`;
     panel.appendChild(title);
     panel.appendChild(this.closeButton());
 
     const body = document.createElement("div");
     panel.appendChild(body);
 
+    // A phone has no Escape key — point at the button that does the same job.
     const hint = document.createElement("div");
-    hint.textContent = "[Esc] leave";
+    hint.textContent = layout.touch ? "✕ leave" : "[Esc] leave";
     hint.style.cssText = "margin-top:14px;color:#888;font-size:12px;";
     panel.appendChild(hint);
 
@@ -339,10 +337,11 @@ export class ShopOverlay {
       btn.textContent = opts.actionLabel;
       btn.disabled = !opts.enabled;
       btn.style.cssText =
-        `flex:none;padding:8px 12px;font-family:${FONT_UI};font-size:12px;font-weight:bold;cursor:pointer;` +
-        "color:#fff;border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
-        `background:linear-gradient(180deg,${opts.highlight ? "#3d7a5e,#2a5a44" : "#3a9d40,#2a6e2f"});` +
-        "transition:filter 0.12s;" +
+        actionButtonCss(
+          FONT_UI,
+          `linear-gradient(180deg,${opts.highlight ? "#3d7a5e,#2a5a44" : "#3a9d40,#2a6e2f"})`,
+        ) +
+        "border:1px solid rgba(255,255,255,0.18);" +
         (opts.enabled ? "" : "opacity:0.35;cursor:default;");
       if (opts.enabled) {
         btn.addEventListener("mouseenter", () => (btn.style.filter = "brightness(1.2)"));
@@ -365,11 +364,7 @@ export class ShopOverlay {
     const btn = document.createElement("button");
     btn.textContent = "✕";
     btn.setAttribute("aria-label", "Close");
-    btn.style.cssText =
-      "position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;" +
-      `font-family:${FONT_UI};font-size:15px;line-height:1;cursor:pointer;color:#fff;` +
-      "border:1px solid rgba(255,255,255,0.18);border-radius:8px;" +
-      "background:rgba(255,255,255,0.08);";
+    btn.style.cssText = closeButtonCss(FONT_UI);
     btn.addEventListener("click", () => this.close());
     return btn;
   }

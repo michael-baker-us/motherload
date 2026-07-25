@@ -1,5 +1,6 @@
 import { SAVE_KEY } from "../game/save";
 import { FONT_UI } from "../render/fonts";
+import { TAP_MIN } from "./layout";
 
 let shown = false;
 
@@ -17,11 +18,13 @@ export function showCrashScreen(error: unknown): void {
   const overlay = document.createElement("div");
   overlay.style.cssText =
     "position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;" +
+    "padding:env(safe-area-inset-top) calc(16px + env(safe-area-inset-right)) " +
+    "env(safe-area-inset-bottom) calc(16px + env(safe-area-inset-left));" +
     `background:rgba(6,4,8,0.93);font-family:${FONT_UI};color:#e8e8e8;`;
 
   const panel = document.createElement("div");
   panel.style.cssText =
-    "max-width:420px;text-align:center;padding:30px 28px;border-radius:16px;" +
+    "width:420px;max-width:100%;text-align:center;padding:30px 24px;border-radius:16px;" +
     "border:1px solid rgba(255,255,255,0.14);background:rgba(22,17,24,0.92);" +
     "box-shadow:0 24px 60px rgba(0,0,0,0.6);";
 
@@ -57,8 +60,9 @@ function crashButton(label: string, background: string, onClick: () => void): HT
   const btn = document.createElement("button");
   btn.textContent = label;
   btn.style.cssText =
-    `padding:10px 16px;font-family:${FONT_UI};font-size:13px;cursor:pointer;color:#fff;` +
-    `border:1px solid rgba(255,255,255,0.18);border-radius:8px;background:${background};`;
+    `min-height:${TAP_MIN}px;padding:10px 16px;font-family:${FONT_UI};font-size:13px;` +
+    "cursor:pointer;color:#fff;touch-action:manipulation;" +
+    `border:1px solid rgba(255,255,255,0.18);border-radius:10px;background:${background};`;
   btn.addEventListener("click", onClick);
   return btn;
 }

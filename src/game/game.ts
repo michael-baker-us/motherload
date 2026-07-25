@@ -510,10 +510,14 @@ export class Game {
     return stationInSpan(left, right);
   }
 
-  stationHint(): string | null {
+  /**
+   * The station the pod is parked on, if any. Just the name — how you're told
+   * to enter it (a key, a button) is the UI's business, and depends on both the
+   * player's bindings and whether they have a keyboard at all.
+   */
+  nearbyStationLabel(): string | null {
     if (this.state !== "playing") return null;
-    const station = this.currentStation();
-    return station ? `[E] enter ${station.label}` : null;
+    return this.currentStation()?.label ?? null;
   }
 
   applyDamage(amount: number, cause: string): void {

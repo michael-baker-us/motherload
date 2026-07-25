@@ -9,6 +9,7 @@ import { biomeAt } from "../game/biomes";
 import { SEASONS, seasonFog, type FloraPalette, type Season } from "../game/seasons";
 import { digClass, hardnessScaleAt, stratumAt, TILE_DEFS, TileId } from "../game/tiles";
 import { Hud } from "../ui/hud";
+import { layout } from "../ui/layout";
 import { bakeCrust, bakeEdge, bakeGlow, bakePuff } from "./bake";
 import { CameraFX } from "./camerafx";
 import { FONT_DISPLAY, FONT_UI } from "./fonts";
@@ -18,6 +19,7 @@ import { darknessAt, flicker, type Emitter, type Light } from "./lights";
 import { PostFX } from "./postfx";
 import { viewPrefs } from "./prefs";
 import { Sky } from "./sky";
+import { fitFontSize, wrapText } from "./text";
 import { makeTileTextures, makeTopsoilTextures, shade, TILE_VARIANTS, type TileTextures } from "./tileart";
 import { Weather } from "./weather";
 
@@ -401,7 +403,7 @@ export class Renderer {
         money: game.money,
         cargoUnits: cargoUnits(p.cargo),
         cargoCapacity: p.cargoCapacity,
-        hint: game.stationHint(),
+        hint: game.nearbyStationLabel(),
         onboarding: game.onboardingHint(),
         objective: game.objective(),
         toast: game.toast,
@@ -1892,7 +1894,10 @@ export class Renderer {
     const vh = ctx.canvas.clientHeight;
     const t = this.time;
     const cx = vw / 2;
-    const ly = vh * 0.33; // logo baseline
+    // A short screen (landscape phone) is nearly all menu — the logo moves up
+    // and the supporting type drops out rather than being drawn underneath it.
+    const short = vh < 520;
+    const ly = vh * (short ? 0.15 : 0.33); // logo baseline
 
     // Cinematic wash over the living sky: darker top & bottom, warm centre glow.
     const wash = ctx.createLinearGradient(0, 0, 0, vh);
@@ -1912,7 +1917,7 @@ export class Renderer {
 
     // Logo: bevelled, gold-gradient, softly glowing MOTHERLOAD.
     // Divisor keeps all ten letters inside the viewport on phone widths.
-    const size = Math.min(74, vw / 9.5);
+    const size = Math.min(short ? 44 : 74, vw / 9.5);
     ctx.font = `900 ${size}px ${FONT_DISPLAY}`;
     ctx.letterSpacing = `${(size * 0.05).toFixed(1)}px`;
     ctx.fillStyle = "rgba(0,0,0,0.55)";
@@ -1929,7 +1934,14 @@ export class Renderer {
     ctx.restore();
     ctx.letterSpacing = "0px";
 
-    // Mood subtitle + a thin rule + a demo tag.
+    // Mood subtitle + a thin rule + a demo tag — the first things to go when
+    // there's no vertical room for them.
+    if (short) {
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.font = `14px ${FONT_UI}`;
+      return;
+    }
     ctx.font = `600 ${Math.min(15, vw / 62)}px ${FONT_UI}`;
     ctx.fillStyle = "rgba(232,214,184,0.85)";
     ctx.fillText("A  S U B T E R R A N E A N   D E S C E N T", cx, ly + size * 0.7);
@@ -1952,27 +1964,29 @@ export class Renderer {
     ctx.fillStyle = "rgba(6,9,16,0.82)";
     ctx.fillRect(0, 0, vw, vh);
     ctx.textBaseline = "top";
+    const top = vh * (vh < 560 ? 0.14 : 0.24);
     ctx.fillStyle = "rgba(142,200,255,0.85)";
     ctx.font = `bold 12px ${FONT_UI}`;
-    center(ctx, "◈ INCOMING TRANSMISSION", vw, vh * 0.24);
+    center(ctx, "◈ INCOMING TRANSMISSION", vw, top);
     ctx.fillStyle = "#8ec8ff";
-    ctx.font = `bold 34px ${FONT_DISPLAY}`;
-    center(ctx, "THE SIGNAL", vw, vh * 0.24 + 22);
+    ctx.font = `bold ${headingSize(ctx, 34, "THE SIGNAL", vw, FONT_DISPLAY)}px ${FONT_DISPLAY}`;
+    center(ctx, "THE SIGNAL", vw, top + 22);
     ctx.fillStyle = "#d8e6ff";
-    ctx.font = `15px ${FONT_UI}`;
-    const lines = [
-      `Deep-scan has flagged an anomaly ${SLICE.goalDepth} metres down.`,
-      "Mine minerals to fund your rig, upgrade the drill and tank,",
-      "and descend to reach it. There's no refuelling down there —",
-      "watch your gauge, and don't get greedy.",
-      // The season's own flavour line — data, so a new season needs no code here.
-      game.season.briefing,
-    ];
-    lines.forEach((l, i) => center(ctx, l, vw, vh * 0.24 + 80 + i * 24));
+    // Prose, not pre-broken lines: it rewraps to the screen it's actually on.
+    const body =
+      `Deep-scan has flagged an anomaly ${SLICE.goalDepth} metres down. ` +
+      "Mine minerals to fund your rig, upgrade the drill and tank, and descend " +
+      "to reach it. There's no refuelling down there — watch your gauge, and " +
+      "don't get greedy.";
+    let y = top + 80;
+    y = paragraph(ctx, body, vw, y, 15, 22);
+    // The season's own flavour line — data, so a new season needs no code here.
+    y = paragraph(ctx, game.season.briefing, vw, y + 10, 15, 22);
     const pulse = 0.7 + 0.3 * Math.sin(this.time * 3);
     ctx.fillStyle = `rgba(255,233,122,${pulse})`;
     ctx.font = `17px ${FONT_UI}`;
-    center(ctx, "[Enter] begin descent", vw, vh * 0.24 + 80 + lines.length * 24 + 24);
+    const begin = continuePrompt("begin descent");
+    if (begin) center(ctx, begin, vw, y + 18);
     ctx.font = `14px ${FONT_UI}`;
   }
 
@@ -1989,14 +2003,22 @@ export class Renderer {
     ctx.globalAlpha = reveal;
     ctx.fillStyle = "#e04a3a";
     ctx.font = `bold 30px ${FONT_DISPLAY}`;
-    center(ctx, "POD LOST", viewWidth, viewHeight * 0.4 - (1 - reveal) * 12);
+    const top = viewHeight * 0.4;
+    center(ctx, "POD LOST", viewWidth, top - (1 - reveal) * 12);
     ctx.fillStyle = "#ffffff";
-    ctx.font = `15px ${FONT_UI}`;
-    center(ctx, game.deathCause, viewWidth, viewHeight * 0.4 + 46);
-    center(ctx, `Salvage fee $${game.salvageFeeDue} · cargo and supplies lost`, viewWidth, viewHeight * 0.4 + 70);
+    let y = paragraph(ctx, game.deathCause, viewWidth, top + 46, 15, 21);
+    y = paragraph(
+      ctx,
+      `Salvage fee $${game.salvageFeeDue} · cargo and supplies lost`,
+      viewWidth,
+      y + 3,
+      15,
+      21,
+    );
     ctx.globalAlpha = promptIn;
     ctx.fillStyle = "#ffe97a";
-    center(ctx, "[Enter] launch replacement pod", viewWidth, viewHeight * 0.4 + 106);
+    const relaunch = continuePrompt("launch replacement pod");
+    if (relaunch) center(ctx, relaunch, viewWidth, y + 18);
     ctx.globalAlpha = 1;
     ctx.font = `14px ${FONT_UI}`;
   }
@@ -2016,15 +2038,22 @@ export class Renderer {
     ctx.fillRect(0, 0, vw, vh);
     ctx.textBaseline = "top";
     ctx.globalAlpha = reveal;
+    const top = vh * (vh < 560 ? 0.16 : 0.3);
     ctx.fillStyle = "rgba(142,200,255,0.8)";
     ctx.font = `bold 12px ${FONT_UI}`;
-    center(ctx, "◈ DEMO COMPLETE", vw, vh * 0.3 - (1 - reveal) * 10);
+    center(ctx, "◈ DEMO COMPLETE", vw, top - (1 - reveal) * 10);
     ctx.fillStyle = "#8ec8ff";
-    ctx.font = `bold 32px ${FONT_DISPLAY}`;
-    center(ctx, "ANOMALY REACHED", vw, vh * 0.3 + 24 - (1 - reveal) * 10);
+    ctx.font = `bold ${headingSize(ctx, 32, "ANOMALY REACHED", vw, FONT_DISPLAY)}px ${FONT_DISPLAY}`;
+    center(ctx, "ANOMALY REACHED", vw, top + 24 - (1 - reveal) * 10);
     ctx.fillStyle = "#d8e6ff";
-    ctx.font = `15px ${FONT_UI}`;
-    center(ctx, "You've reached the signal at the bottom of the world.", vw, vh * 0.3 + 70);
+    let y = paragraph(
+      ctx,
+      "You've reached the signal at the bottom of the world.",
+      vw,
+      top + 70,
+      15,
+      21,
+    );
 
     ctx.font = `15px ${FONT_UI}`;
     ctx.fillStyle = "#ffffff";
@@ -2034,15 +2063,17 @@ export class Renderer {
       `Time             ${time}`,
       `Pods lost        ${s.deaths}`,
     ];
+    y += 12;
     stats.forEach((line, i) => {
       ctx.globalAlpha = clamp((t - (0.6 + i * 0.18)) / 0.35, 0, 1);
-      center(ctx, line, vw, vh * 0.3 + 108 + i * 26);
+      center(ctx, line, vw, y + i * 26);
     });
 
     ctx.globalAlpha = clamp((t - (0.6 + stats.length * 0.18 + 0.25)) / 0.35, 0, 1);
     ctx.fillStyle = "#ffe97a";
     ctx.font = `16px ${FONT_UI}`;
-    center(ctx, "[Enter] keep exploring", vw, vh * 0.3 + 108 + stats.length * 26 + 24);
+    const onward = continuePrompt("keep exploring");
+    if (onward) center(ctx, onward, vw, y + stats.length * 26 + 24);
     ctx.globalAlpha = 1;
     ctx.font = `14px ${FONT_UI}`;
   }
@@ -2050,4 +2081,51 @@ export class Renderer {
 
 function center(ctx: CanvasRenderingContext2D, text: string, viewWidth: number, y: number): void {
   ctx.fillText(text, (viewWidth - ctx.measureText(text).width) / 2, y);
+}
+
+/** Usable text column: never wider than the screen, never wider than a comfy read. */
+function textWidth(viewWidth: number): number {
+  return Math.min(viewWidth - 40, 620);
+}
+
+/**
+ * Centred body copy, wrapped to the viewport. Returns the y below the last
+ * line so callers can stack blocks without hard-coded offsets — which is what
+ * made these screens overflow on a phone in the first place.
+ */
+function paragraph(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  viewWidth: number,
+  y: number,
+  size: number,
+  lineHeight: number,
+): number {
+  ctx.font = `${size}px ${FONT_UI}`;
+  const lines = wrapText(text, textWidth(viewWidth), (t) => ctx.measureText(t).width);
+  lines.forEach((line, i) => center(ctx, line, viewWidth, y + i * lineHeight));
+  return y + lines.length * lineHeight;
+}
+
+/** Display-font heading size that still fits across the screen. */
+function headingSize(
+  ctx: CanvasRenderingContext2D,
+  preferred: number,
+  text: string,
+  viewWidth: number,
+  font: string,
+): number {
+  return fitFontSize(preferred, 18, viewWidth - 32, (px) => {
+    ctx.font = `bold ${px}px ${font}`;
+    return ctx.measureText(text).width;
+  });
+}
+
+/**
+ * "[Enter] …" on a keyboard. On touch there's a tappable pill for this from
+ * `ui/touchControls.ts`, so the canvas says nothing rather than printing a
+ * second, unpressable copy of the same instruction.
+ */
+function continuePrompt(action: string): string | null {
+  return layout.touch ? null : `[Enter] ${action}`;
 }

@@ -1,8 +1,11 @@
 import { HEAT } from "../game/config";
+import { keyLabel, keysFor } from "../engine/bindings";
 import { clamp } from "../engine/math";
 import { FONT_UI } from "../render/fonts";
 import { iconCanvas, type IconId } from "../render/icons";
 import { alpha, palette } from "../render/palette";
+import { fitFontSize, wrapText } from "../render/text";
+import { layout } from "./layout";
 
 export interface HudData {
   depth: number;
@@ -15,7 +18,7 @@ export interface HudData {
   money: number;
   cargoUnits: number;
   cargoCapacity: number;
-  /** Contextual prompt, e.g. "[E] enter FUEL DEPOT". */
+  /** Station the pod is parked on, e.g. "FUEL DEPOT"; null when there's none. */
   hint: string | null;
   /** First-run guided objective, centered near the top; null when done. */
   onboarding: { text: string; step: number; total: number } | null;
@@ -38,6 +41,11 @@ const BAR_W = PANEL_W - BAR_X - 14;
 
 const MONO = FONT_UI;
 
+/** The key the player would actually press to enter a station, per their bindings. */
+function interactKey(): string {
+  return keyLabel(keysFor("interact")[0] ?? "KeyE");
+}
+
 /**
  * Stateful HUD: displayed values ease toward the real ones (money ticks up,
  * bars glide), and low fuel/hull pulse a warning. One instance per renderer.
@@ -53,7 +61,35 @@ export class Hud {
   private lastMoney = -1;
   private moneyFlash = 0;
 
+  /**
+   * Draws in "UI units": the canvas is scaled by `layout.scale` and inset by the
+   * display cutout first, so every coordinate below is a fixed design size and
+   * the whole HUD grows together on a phone. `viewW`/`viewH` are the *usable*
+   * size in those units — always use them instead of the raw canvas size.
+   */
   draw(ctx: CanvasRenderingContext2D, data: HudData, dt: number): void {
+    const s = layout.scale;
+    const safe = layout.safe;
+    ctx.save();
+    ctx.translate(safe.left, safe.top);
+    ctx.scale(s, s);
+    this.drawScaled(
+      ctx,
+      data,
+      dt,
+      (ctx.canvas.clientWidth - safe.left - safe.right) / s,
+      (ctx.canvas.clientHeight - safe.top - safe.bottom) / s,
+    );
+    ctx.restore();
+  }
+
+  private drawScaled(
+    ctx: CanvasRenderingContext2D,
+    data: HudData,
+    dt: number,
+    viewW: number,
+    viewH: number,
+  ): void {
     this.time += dt;
     const ease = 1 - Math.exp(-9 * dt);
     if (this.shownMoney < 0) {
@@ -152,64 +188,63 @@ export class Hud {
       ctx.fillText(text, 22, 123);
     }
 
-    // Contextual hint pill above the controls line.
-    const viewH = ctx.canvas.clientHeight;
-    ctx.font = `13px ${MONO}`;
-    if (data.hint) {
-      const w = ctx.measureText(data.hint).width;
-      ctx.fillStyle = "rgba(10,12,16,0.72)";
+    // --- The top-of-screen stack -------------------------------------------
+    // Toasts, banners and the station hint all want the top-centre. They share
+    // it with the stats panel, so lay them out as one column: beside the panel
+    // when the screen is wide enough, stacked below it when it isn't (a phone
+    // in portrait), and never on top of each other.
+    const panelBottom = 12 + PANEL_H + (data.dev ? 30 : 8);
+    const roomBeside = viewW - PANEL_W - 36 >= 300;
+    /** Centre `w`, but push clear of the panel when the row is level with it. */
+    const centred = (w: number, y: number): number => {
+      const min = y < panelBottom ? PANEL_W + 24 : 12;
+      return Math.round(Math.max(min, Math.min((viewW - w) / 2, viewW - w - 12)));
+    };
+    let stackY = roomBeside ? 6 : panelBottom;
+
+    // Toast: slides down and fades out. Shrinks to fit rather than running off
+    // the sides — some toasts are long ("◈ AUTUMN · THE TURNING").
+    if (data.toast) {
+      const shown = data.toast.total - data.toast.timeLeft;
+      const slide = 1 - Math.pow(1 - clamp(shown / 0.18, 0, 1), 3);
+      ctx.globalAlpha = Math.min(1, data.toast.timeLeft) * slide;
+      const size = fitFontSize(15, 10, viewW - PANEL_W - 80, (px) => {
+        ctx.font = `bold ${px}px ${MONO}`;
+        return ctx.measureText(data.toast!.text).width;
+      });
+      ctx.font = `bold ${size}px ${MONO}`;
+      const w = ctx.measureText(data.toast.text).width;
+      const y = stackY - 2 + slide * 12;
+      const x = centred(w + 36, y) + 18;
+      ctx.fillStyle = "rgba(10,12,16,0.8)";
       ctx.beginPath();
-      ctx.roundRect(12, viewH - 58, w + 22, 24, 12);
+      ctx.roundRect(x - 18, y, w + 36, 32, 16);
       ctx.fill();
-      ctx.strokeStyle = alpha(palette.amber, 0.35);
+      ctx.strokeStyle = alpha(palette.amber, 0.3);
       ctx.stroke();
       ctx.fillStyle = palette.amber;
-      ctx.fillText(data.hint, 23, viewH - 52);
-    }
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.font = `12px ${MONO}`;
-    ctx.fillText("← → fly/dig · ↑ thrust · ↓ drill · E station · 1-4 items · Esc menu", 16, viewH - 26);
-
-    // Item pills, bottom-right: [1] ⛏icon ×2 — dimmed while the slot is empty.
-    // The icon carries the identity, so the pill only spells out key and count.
-    const viewW = ctx.canvas.clientWidth;
-    ctx.font = `bold 11px ${MONO}`;
-    const ICON_PX = 15;
-    let px = viewW - 14;
-    for (let i = data.items.length - 1; i >= 0; i--) {
-      const item = data.items[i]!;
-      const text = `${item.key}  ×${item.count}`;
-      const w = ctx.measureText(text).width + ICON_PX + 20;
-      px -= w;
-      ctx.globalAlpha = item.count > 0 ? 1 : 0.35;
-      ctx.fillStyle = "rgba(10,12,16,0.72)";
-      ctx.beginPath();
-      ctx.roundRect(px, viewH - 36, w, 23, 11);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.14)";
-      ctx.stroke();
-      ctx.fillStyle = item.count > 0 ? palette.amber : "#9a9a9a";
-      ctx.fillText(item.key, px + 9, viewH - 30);
-      const sprite = iconCanvas(item.icon, ICON_PX);
-      ctx.drawImage(sprite, px + 19, viewH - 33, ICON_PX, ICON_PX);
-      ctx.fillText(`×${item.count}`, px + 19 + ICON_PX + 4, viewH - 30);
+      ctx.fillText(data.toast.text, x, y + 8);
       ctx.globalAlpha = 1;
-      px -= 6;
+      stackY += 40;
     }
 
-    // First-run objective banner, centered near the top.
+    // First-run objective banner. The instructions are full sentences, so they
+    // wrap to whatever width the screen actually has.
     if (data.onboarding) {
       const o = data.onboarding;
       const label = `GETTING STARTED · ${o.step}/${o.total}`;
+      const maxTextW = Math.min(viewW - (roomBeside ? 48 : 60), 520);
       ctx.font = `bold 14px ${MONO}`;
-      const tw = ctx.measureText(o.text).width;
+      const lines = wrapText(o.text, maxTextW, (t) => ctx.measureText(t).width);
+      const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
       ctx.font = `bold 10px ${MONO}`;
-      const cardW = Math.max(tw, ctx.measureText(label).width) + 40;
-      const cardX = Math.round((viewW - cardW) / 2);
-      const cardY = Math.round(viewH * 0.13);
+      const cardW = Math.max(textW, ctx.measureText(label).width) + 40;
+      const cardH = 34 + lines.length * 17;
+      const cardY = Math.round(roomBeside ? Math.max(stackY, viewH * 0.13) : stackY);
+      const cardX = centred(cardW, cardY);
       ctx.fillStyle = "rgba(10,12,16,0.82)";
       ctx.beginPath();
-      ctx.roundRect(cardX, cardY, cardW, 48, 12);
+      ctx.roundRect(cardX, cardY, cardW, cardH, 12);
       ctx.fill();
       ctx.strokeStyle = alpha(palette.amber, 0.4);
       ctx.lineWidth = 1;
@@ -219,7 +254,8 @@ export class Hud {
       ctx.fillText(label, cardX + 20, cardY + 10);
       ctx.fillStyle = "#ffffff";
       ctx.font = `bold 14px ${MONO}`;
-      ctx.fillText(o.text, cardX + 20, cardY + 25);
+      lines.forEach((l, i) => ctx.fillText(l, cardX + 20, cardY + 25 + i * 17));
+      stackY = cardY + cardH + 8;
     }
 
     // Vertical-slice objective banner with a depth progress bar.
@@ -228,9 +264,12 @@ export class Hud {
       const label = "◈ REACH THE ANOMALY";
       const prog = `${Math.min(o.current, o.target)} / ${o.target} m`;
       ctx.font = `bold 12px ${MONO}`;
-      const cardW = Math.max(ctx.measureText(label).width + ctx.measureText(prog).width + 60, 300);
-      const cardX = Math.round((viewW - cardW) / 2);
-      const cardY = Math.round(viewH * 0.13);
+      const cardW = Math.min(
+        viewW - 24,
+        Math.max(ctx.measureText(label).width + ctx.measureText(prog).width + 60, 300),
+      );
+      const cardY = Math.round(roomBeside ? Math.max(stackY, viewH * 0.13) : stackY);
+      const cardX = centred(cardW, cardY);
       ctx.fillStyle = "rgba(10,12,16,0.82)";
       ctx.beginPath();
       ctx.roundRect(cardX, cardY, cardW, 42, 12);
@@ -258,27 +297,64 @@ export class Hud {
         ctx.roundRect(barX, cardY + 28, barW * frac, 6, 3);
         ctx.fill();
       }
+      stackY = cardY + 50;
     }
 
-    // Toast: slides down and fades out.
-    if (data.toast) {
-      const shown = data.toast.total - data.toast.timeLeft;
-      const slide = 1 - Math.pow(1 - clamp(shown / 0.18, 0, 1), 3);
-      ctx.globalAlpha = Math.min(1, data.toast.timeLeft) * slide;
-      ctx.font = `bold 15px ${MONO}`;
-      const w = ctx.measureText(data.toast.text).width;
-      const x = (ctx.canvas.clientWidth - w) / 2;
-      const y = 4 + slide * 14;
-      ctx.fillStyle = "rgba(10,12,16,0.8)";
+    // Station prompt. On touch the bottom of the screen belongs to the
+    // on-screen controls, so it joins the top stack instead of sitting under a
+    // thumb; with a keyboard it stays down by the controls legend.
+    if (data.hint) {
+      const text = layout.touch ? `enter ${data.hint}` : `[${interactKey()}] enter ${data.hint}`;
+      ctx.font = `13px ${MONO}`;
+      const w = ctx.measureText(text).width;
+      const hy = layout.touch ? stackY : viewH - 58;
+      const hx = layout.touch ? centred(w + 22, hy) : 12;
+      ctx.fillStyle = "rgba(10,12,16,0.78)";
       ctx.beginPath();
-      ctx.roundRect(x - 18, y, w + 36, 32, 16);
+      ctx.roundRect(hx, hy, w + 22, 26, 13);
       ctx.fill();
-      ctx.strokeStyle = alpha(palette.amber, 0.3);
+      ctx.strokeStyle = alpha(palette.amber, 0.35);
       ctx.stroke();
       ctx.fillStyle = palette.amber;
-      ctx.fillText(data.toast.text, x, y + 8);
-      ctx.globalAlpha = 1;
+      ctx.fillText(text, hx + 11, hy + 7);
     }
+    if (!layout.touch) {
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.font = `12px ${MONO}`;
+      ctx.fillText(
+        `← → fly/dig · ↑ thrust · ↓ drill · ${interactKey()} station · 1-4 items · Esc menu`,
+        16,
+        viewH - 26,
+      );
+
+      // Item pills, bottom-right: [1] ⛏icon ×2 — dimmed while the slot is empty.
+      // The icon carries the identity, so the pill only spells out key and count.
+      // Touch builds get real buttons for these instead (ui/touchControls.ts).
+      ctx.font = `bold 11px ${MONO}`;
+      const ICON_PX = 15;
+      let px = viewW - 14;
+      for (let i = data.items.length - 1; i >= 0; i--) {
+        const item = data.items[i]!;
+        const text = `${item.key}  ×${item.count}`;
+        const w = ctx.measureText(text).width + ICON_PX + 20;
+        px -= w;
+        ctx.globalAlpha = item.count > 0 ? 1 : 0.35;
+        ctx.fillStyle = "rgba(10,12,16,0.72)";
+        ctx.beginPath();
+        ctx.roundRect(px, viewH - 36, w, 23, 11);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.14)";
+        ctx.stroke();
+        ctx.fillStyle = item.count > 0 ? palette.amber : "#9a9a9a";
+        ctx.fillText(item.key, px + 9, viewH - 30);
+        const sprite = iconCanvas(item.icon, ICON_PX);
+        ctx.drawImage(sprite, px + 19, viewH - 33, ICON_PX, ICON_PX);
+        ctx.fillText(`×${item.count}`, px + 19 + ICON_PX + 4, viewH - 30);
+        ctx.globalAlpha = 1;
+        px -= 6;
+      }
+    }
+
     ctx.font = `14px ${MONO}`;
   }
 

@@ -37,13 +37,23 @@ src/
   render/   all drawing: pre-rendered tile textures, particles, lighting, sky
   audio/    procedural sound engine + persisted audio settings
   game/     all simulation logic — pure of DOM/canvas, unit-tested
-  ui/       HUD, shop overlay, pause/settings menu overlay
+  ui/       HUD, title/shop/menu overlays, on-screen touch controls
 ```
 
 **The core rule**: `game/` modules never touch the DOM or canvas — they're
 plain state + math, so Vitest covers them without a browser. `render/`, `ui/`,
 and `audio/` read game state but never write simulation-relevant fields
 directly; they call methods on `Game`.
+
+**One screen model.** `ui/layout.ts` is the single source of truth for the
+shape of the device — viewport, touch capability, "compact" (phone) breakpoint,
+canvas-UI scale, and the display-cutout insets — refreshed from `main.ts`'s
+resize handler. Both halves of the interface read it: the canvas UI (`ui/hud.ts`
+and the renderer's title/briefing/death/win screens, which draw in scaled "UI
+units" and wrap their text via `render/text.ts`) and the DOM overlays, which
+also share their panel/button CSS from there so phone sizing is applied once.
+Anything new that positions itself on screen should read `layout`, not
+`window.innerWidth`.
 
 **Tuning lives in one place.** `game/config.ts` holds every game-feel and
 balance number (physics, fuel burn, hazard chances, prices, heat) grouped

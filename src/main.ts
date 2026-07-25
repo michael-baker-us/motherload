@@ -10,6 +10,7 @@ import { loadGamePrefs } from "./game/prefs";
 import { loadViewPrefs } from "./render/prefs";
 import { Renderer } from "./render/renderer";
 import { showCrashScreen } from "./ui/crash";
+import { measureLayout } from "./ui/layout";
 import { TitleOverlay } from "./ui/title";
 import { TouchControls } from "./ui/touchControls";
 
@@ -20,6 +21,9 @@ if (!ctx) throw new Error("2d context unavailable");
 
 const input = new Input();
 input.attach(window);
+// Screen shape is needed before anything builds UI — overlays size themselves
+// from it at construction, not just at render time.
+measureLayout(window.innerWidth, window.innerHeight);
 loadViewPrefs(window.localStorage);
 loadGamePrefs(window.localStorage);
 loadBindings(window.localStorage);
@@ -46,6 +50,8 @@ if (import.meta.env.DEV) {
 }
 
 function resize(): void {
+  // UI layout first: the HUD and screens read it while rendering this frame.
+  measureLayout(window.innerWidth, window.innerHeight);
   const dpr = window.devicePixelRatio || 1;
   canvas!.width = Math.round(window.innerWidth * dpr);
   canvas!.height = Math.round(window.innerHeight * dpr);
